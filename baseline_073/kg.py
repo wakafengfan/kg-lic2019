@@ -6,12 +6,13 @@ import numpy as np
 from random import choice
 from tqdm import tqdm
 
+from configuration.config import data_dir
 
-train_data = json.load(open('../data/train_data_me.json'))
-dev_data = json.load(open('../data/dev_data_me.json'))
-id2predicate, predicate2id = json.load(open('../data/all_50_schemas_me.json'))
+train_data = json.load(open(data_dir + '/train_data_me.json'))
+dev_data = json.load(open(data_dir + '/dev_data_me.json'))
+id2predicate, predicate2id = json.load(open(data_dir + '/all_50_schemas_me.json'))
 id2predicate = {int(i):j for i,j in id2predicate.items()}
-id2char, char2id = json.load(open('../data/all_chars_me.json'))
+id2char, char2id = json.load(open(data_dir + '/all_chars_me.json'))
 
 char_size = 128
 num_classes = len(id2predicate)

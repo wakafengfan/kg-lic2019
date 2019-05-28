@@ -173,6 +173,11 @@ loader = Data.DataLoader(
 # print("len",len(id2char))
 s_m = tmp_model.s_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE)
 po_m = tmp_model.po_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE, 49)
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+s_m.to(device)
+po_m.to(device)
+
 params = list(s_m.parameters())
 
 params += list(po_m.parameters())
@@ -247,6 +252,14 @@ for i in range(EPOCH_NUM):
         o1 = loader_res["O1"]
         o2 = loader_res["O2"]
 
+        t_s.to(device)
+        k1.to(device)
+        k2.to(device)
+        s1.to(device)
+        s2.to(device)
+        o1.to(device)
+        o2.to(device)
+
         ps_1, ps_2, t, t_max, mask = s_m(t_s)
 
         t, t_max, k1, k2 = t, t_max, k1, k2
@@ -287,7 +300,7 @@ for i in range(EPOCH_NUM):
         tr_loss += loss_sum.item()
 
         if step % 10 == 0:
-            print(f'Epoch:{i} - batch:{step}/{len(loader.dataset)} - loss:{tr_loss/step:.4f}')
+            print(f'Epoch:{i} - batch:{step}/{len(loader.dataset)//64} - loss:{tr_loss/(step+1):.4f}')
 
     torch.save(s_m, 'models_real/s_' + str(i) + '.pkl')
     torch.save(po_m, 'models_real/po_' + str(i) + '.pkl')
