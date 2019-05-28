@@ -220,7 +220,7 @@ def extract_items(text_in):
     _s = [char2id.get(c, 1) for c in text_in]
     _s = torch.tensor([_s])
     with torch.no_grad():
-        _k1, _k2, _t, _t_concat = subject_model(_s)
+        _k1, _k2, _t, _t_concat = subject_model(_s.to(device))
     _k1, _k2 = _k1[0, :], _k2[0, :]
     for i,_kk1 in enumerate(_k1):
         if _kk1 > 0.5:
