@@ -286,11 +286,11 @@ for i in range(EPOCH_NUM):
         if step % 10 == 0:
             print(f'Epoch:{i} - batch:{step}/{len(loader.dataset) // 64} - loss:{tr_loss / (step + 1):.4f}')
 
-    torch.save(s_m, 'models_real/s_' + str(i) + '.pkl')
-    torch.save(po_m, 'models_real/po_' + str(i) + '.pkl')
+    # torch.save(s_m, 'models_real/s_' + str(i) + '.pkl')
+    # torch.save(po_m, 'models_real/po_' + str(i) + '.pkl')
     f1, precision, recall = evaluate()
 
-    print("epoch:", i, "loss:", loss_sum.data)
+    # print("epoch:", i, "loss:", loss_sum.data)
 
     if f1 >= best_f1:
         best_f1 = f1
