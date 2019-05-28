@@ -15,6 +15,7 @@ import torch.nn.functional as F
 import time
 
 from baseline_073 import tmp_model
+from configuration.config import data_dir
 
 torch.backends.cudnn.benchmark = True
 
@@ -45,11 +46,11 @@ def seq_padding_vec(X):
     return [x + [[1, 0]] * (ML - len(x)) for x in X]
 
 
-train_data = json.load(open('../data/train_data_me.json'))
-dev_data = json.load(open('../data/dev_data_me.json'))
-id2predicate, predicate2id = json.load(open('../data/all_50_schemas_me.json'))
+train_data = json.load(open(data_dir + '/train_data_me.json'))
+dev_data = json.load(open(data_dir + '/dev_data_me.json'))
+id2predicate, predicate2id = json.load(open(data_dir + '/all_50_schemas_me.json'))
 id2predicate = {int(i): j for i, j in id2predicate.items()}
-id2char, char2id = json.load(open('../data/all_chars_me.json'))
+id2char, char2id = json.load(open(data_dir + '/all_chars_me.json'))
 num_classes = len(id2predicate)
 
 
@@ -118,7 +119,7 @@ class myDataset(Data.Dataset):
     """
 
     def __init__(self, _T, _S1, _S2, _K1, _K2, _O1, _O2):
-        # xy = np.loadtxt('../dataSet/diabetes.csv.gz', delimiter=',', dtype=np.float32) # 使用numpy读取数据
+        # xy = np.loadtxt(data_dir + 'Set/diabetes.csv.gz', delimiter=',', dtype=np.float32) # 使用numpy读取数据
         self.x_data = _T
         self.y1_data = _S1
         self.y2_data = _S2
@@ -235,6 +236,7 @@ best_f1 = 0
 best_epoch = 0
 
 for i in range(EPOCH_NUM):
+    tr_loss = 0
     for step, loader_res in tqdm(iter(enumerate(loader))):
         # print(get_now_time())
         t_s = loader_res["T"]
@@ -282,14 +284,16 @@ for i in range(EPOCH_NUM):
         loss_sum.backward()
         optimizer.step()
 
+        tr_loss += loss_sum.item()
+
         if step % 10 == 0:
-            print(f'Epoch:{i} - batch:{step}/{loader.dataset}')
+            print(f'Epoch:{i} - batch:{step}/{len(loader.dataset)} - loss:{tr_loss/step:.4f}')
 
     torch.save(s_m, 'models_real/s_' + str(i) + '.pkl')
     torch.save(po_m, 'models_real/po_' + str(i) + '.pkl')
     f1, precision, recall = evaluate()
 
-    print("epoch:", i, "loss:", loss_sum.data)
+    print("epoch:", i, "loss:", loss_sum.item())
 
     if f1 >= best_f1:
         best_f1 = f1
