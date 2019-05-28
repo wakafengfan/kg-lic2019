@@ -33,7 +33,7 @@ def seq_gather(x):
     最终输出[None, s_size]的向量。
     """
     seq, idxs = x
-    batch_idxs = torch.arange(0, seq.size(0))
+    batch_idxs = torch.arange(0, seq.size(0)).cuda()
 
     batch_idxs = torch.unsqueeze(batch_idxs, 1)
 
@@ -52,10 +52,10 @@ class s_model(nn.Module):
     def __init__(self, word_dict_length, word_emb_size, lstm_hidden_size):
         super(s_model, self).__init__()
 
-        self.embeds = nn.Embedding(word_dict_length, word_emb_size)
+        self.embeds = nn.Embedding(word_dict_length, word_emb_size).cuda()
         self.fc1_dropout = nn.Sequential(
-            nn.Dropout(0.25),  # drop 20% of the neuron
-        )
+            nn.Dropout(0.25).cuda(),  # drop 20% of the neuron
+        ).cuda()
 
         self.lstm1 = nn.LSTM(
             input_size=word_emb_size,
@@ -63,7 +63,7 @@ class s_model(nn.Module):
             num_layers=1,
             batch_first=True,
             bidirectional=True
-        )
+        ).cuda()
 
         self.lstm2 = nn.LSTM(
             input_size=word_emb_size,
@@ -71,7 +71,7 @@ class s_model(nn.Module):
             num_layers=1,
             batch_first=True,
             bidirectional=True
-        )
+        ).cuda()
 
         self.conv1 = nn.Sequential(
             nn.Conv1d(
@@ -80,19 +80,19 @@ class s_model(nn.Module):
                 kernel_size=3,  # filter的长与宽
                 stride=1,  # 每隔多少步跳一下
                 padding=1,  # 周围围上一圈 if stride= 1, pading=(kernel_size-1)/2
-            ),
-            nn.ReLU(),
-        )
+            ).cuda(),
+            nn.ReLU().cuda(),
+        ).cuda()
         self.fc_ps1 = nn.Sequential(
             nn.Linear(word_emb_size, 1),
-        )
+        ).cuda()
 
         self.fc_ps2 = nn.Sequential(
             nn.Linear(word_emb_size, 1),
-        )
+        ).cuda()
 
     def forward(self, t):
-        mask = torch.gt(torch.unsqueeze(t, 2), 0).type(torch.FloatTensor)  # (batch_size,sent_len,1)
+        mask = torch.gt(torch.unsqueeze(t, 2), 0).type(torch.cuda.FloatTensor)  # (batch_size,sent_len,1)
         mask.requires_grad = False
 
         outs = self.embeds(t)
@@ -119,7 +119,7 @@ class s_model(nn.Module):
         ps1 = self.fc_ps1(h)
         ps2 = self.fc_ps2(h)
 
-        return [ps1, ps2, t, t_max, mask]
+        return [ps1.cuda(), ps2.cuda(), t.cuda(), t_max.cuda(), mask.cuda()]
 
 
 class po_model(nn.Module):
@@ -133,19 +133,19 @@ class po_model(nn.Module):
                 kernel_size=3,  # filter的长与宽
                 stride=1,  # 每隔多少步跳一下
                 padding=1,  # 周围围上一圈 if stride= 1, pading=(kernel_size-1)/2
-            ),
-            nn.ReLU(),
-        )
+            ).cuda(),
+            nn.ReLU().cuda(),
+        ).cuda()
 
         self.fc_ps1 = nn.Sequential(
-            nn.Linear(word_emb_size, num_classes + 1),
+            nn.Linear(word_emb_size, num_classes + 1).cuda(),
             # nn.Softmax(),
-        )
+        ).cuda()
 
         self.fc_ps2 = nn.Sequential(
-            nn.Linear(word_emb_size, num_classes + 1),
+            nn.Linear(word_emb_size, num_classes + 1).cuda(),
             # nn.Softmax(),
-        )
+        ).cuda()
 
     def forward(self, t, t_max, k1, k2):
         k1 = seq_gather([t, k1])
@@ -162,4 +162,4 @@ class po_model(nn.Module):
         po1 = self.fc_ps1(h)
         po2 = self.fc_ps2(h)
 
-        return [po1, po2]
+        return [po1.cuda(), po2.cuda()]

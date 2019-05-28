@@ -1,10 +1,8 @@
-#! -*- coding:utf-8 -*-
-
 import json
 import numpy as np
 from random import choice
 from tqdm import tqdm
-
+import model
 import torch
 from torch.autograd import Variable
 # import data_prepare
@@ -14,7 +12,6 @@ import torch.nn.functional as F
 
 import time
 
-from baseline_073 import tmp_model
 from configuration.config import data_dir
 
 torch.backends.cudnn.benchmark = True
@@ -171,27 +168,22 @@ loader = Data.DataLoader(
 )
 
 # print("len",len(id2char))
-s_m = tmp_model.s_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE)
-po_m = tmp_model.po_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE, 49)
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-s_m.to(device)
-po_m.to(device)
-
+s_m = model.s_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE).cuda()
+po_m = model.po_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE, 49).cuda()
 params = list(s_m.parameters())
 
 params += list(po_m.parameters())
 optimizer = torch.optim.Adam(params, lr=0.001)
 
-loss = torch.nn.CrossEntropyLoss()
-b_loss = torch.nn.BCEWithLogitsLoss()
+loss = torch.nn.CrossEntropyLoss().cuda()
+b_loss = torch.nn.BCEWithLogitsLoss().cuda()
 
 
 def extract_items(text_in):
     R = []
     _s = [char2id.get(c, 1) for c in text_in]
     _s = np.array([_s])
-    _k1, _k2, t, t_max, mask = s_m(torch.LongTensor(_s))
+    _k1, _k2, t, t_max, mask = s_m(torch.LongTensor(_s).cuda())
     _k1, _k2 = _k1[0, :, 0], _k2[0, :, 0]
     _kk1s = []
     for i, _kk1 in enumerate(_k1):
@@ -203,7 +195,7 @@ def extract_items(text_in):
                     break
             if _subject:
                 _k1, _k2 = torch.LongTensor([[i]]), torch.LongTensor([[i + j]])  # np.array([i]), np.array([i+j])
-                _o1, _o2 = po_m(t, t_max, _k1, _k2)
+                _o1, _o2 = po_m(t.cuda(), t_max.cuda(), _k1.cuda(), _k2.cuda())
                 _o1, _o2 = _o1.cpu().data.numpy(), _o2.cpu().data.numpy()
 
                 _o1, _o2 = np.argmax(_o1[0], 1), np.argmax(_o2[0], 1)
@@ -244,31 +236,23 @@ for i in range(EPOCH_NUM):
     tr_loss = 0
     for step, loader_res in tqdm(iter(enumerate(loader))):
         # print(get_now_time())
-        t_s = loader_res["T"]
-        k1 = loader_res["K1"]
-        k2 = loader_res["K2"]
-        s1 = loader_res["S1"]
-        s2 = loader_res["S2"]
-        o1 = loader_res["O1"]
-        o2 = loader_res["O2"]
-
-        t_s.to(device)
-        k1.to(device)
-        k2.to(device)
-        s1.to(device)
-        s2.to(device)
-        o1.to(device)
-        o2.to(device)
+        t_s = loader_res["T"].cuda()
+        k1 = loader_res["K1"].cuda()
+        k2 = loader_res["K2"].cuda()
+        s1 = loader_res["S1"].cuda()
+        s2 = loader_res["S2"].cuda()
+        o1 = loader_res["O1"].cuda()
+        o2 = loader_res["O2"].cuda()
 
         ps_1, ps_2, t, t_max, mask = s_m(t_s)
 
-        t, t_max, k1, k2 = t, t_max, k1, k2
+        t, t_max, k1, k2 = t.cuda(), t_max.cuda(), k1.cuda(), k2.cuda()
         po_1, po_2 = po_m(t, t_max, k1, k2)
 
-        ps_1 = ps_1
-        ps_2 = ps_2
-        po_1 = po_1
-        po_2 = po_2
+        ps_1 = ps_1.cuda()
+        ps_2 = ps_2.cuda()
+        po_1 = po_1.cuda()
+        po_2 = po_2.cuda()
 
         s1 = torch.unsqueeze(s1, 2)
         s2 = torch.unsqueeze(s2, 2)
@@ -300,13 +284,13 @@ for i in range(EPOCH_NUM):
         tr_loss += loss_sum.item()
 
         if step % 10 == 0:
-            print(f'Epoch:{i} - batch:{step}/{len(loader.dataset)//64} - loss:{tr_loss/(step+1):.4f}')
+            print(f'Epoch:{i} - batch:{step}/{len(loader.dataset) // 64} - loss:{tr_loss / (step + 1):.4f}')
 
     torch.save(s_m, 'models_real/s_' + str(i) + '.pkl')
     torch.save(po_m, 'models_real/po_' + str(i) + '.pkl')
     f1, precision, recall = evaluate()
 
-    print("epoch:", i, "loss:", loss_sum.item())
+    print("epoch:", i, "loss:", loss_sum.data)
 
     if f1 >= best_f1:
         best_f1 = f1
