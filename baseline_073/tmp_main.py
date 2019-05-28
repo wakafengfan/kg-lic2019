@@ -2,7 +2,6 @@ import json
 import numpy as np
 from random import choice
 from tqdm import tqdm
-import model
 import torch
 from torch.autograd import Variable
 # import data_prepare
@@ -12,6 +11,7 @@ import torch.nn.functional as F
 
 import time
 
+from baseline_073 import tmp_model
 from configuration.config import data_dir
 
 torch.backends.cudnn.benchmark = True
@@ -168,8 +168,8 @@ loader = Data.DataLoader(
 )
 
 # print("len",len(id2char))
-s_m = model.s_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE).cuda()
-po_m = model.po_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE, 49).cuda()
+s_m = tmp_model.s_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE).cuda()
+po_m = tmp_model.po_model(len(char2id) + 2, CHAR_SIZE, HIDDEN_SIZE, 49).cuda()
 params = list(s_m.parameters())
 
 params += list(po_m.parameters())
