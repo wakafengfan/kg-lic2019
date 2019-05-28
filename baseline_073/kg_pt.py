@@ -212,8 +212,9 @@ s2_loss_func = nn.BCEWithLogitsLoss()
 o1_loss_func = nn.CrossEntropyLoss()
 o2_loss_func = nn.CrossEntropyLoss()
 
-optim_subject = optim.Adam(subject_model.parameters(), lr=0.001)
-optim_object = optim.Adam(object_model.parameters(), lr=0.001)
+params = list(subject_model.parameters()) + list(object_model.parameters())
+optim = optim.Adam(params, lr=0.001)
+# optim_object = optim.Adam(object_model.parameters(), lr=0.001)
 
 def extract_items(text_in):
     R = []
@@ -273,14 +274,10 @@ for e in range(10):
         #     tmp_loss = tmp_loss.mean()
 
         tr_total_loss += tmp_loss.item()
-        tmp_loss.backward()
-        torch.nn.utils.clip_grad_norm_(subject_model.parameters(), 5.0)
-        torch.nn.utils.clip_grad_norm_(object_model.parameters(), 5.0)
 
-        optim_subject.step()
-        optim_object.step()
-        optim_subject.zero_grad()
-        optim_object.zero_grad()
+        optim.zero_grad()
+        tmp_loss.backward()
+        optim.step()
 
         if batch_idx % 10 == 0:
             print(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss/batch_idx:.4f}')
