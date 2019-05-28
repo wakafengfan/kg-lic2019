@@ -38,50 +38,50 @@ class data_generator:
     def __len__(self):
         return self.steps
     def __iter__(self):
-        while True:
-            idxs = list(range(len(self.data)))
-            np.random.shuffle(idxs)
-            T, S1, S2, K1, K2, O1, O2, = [], [], [], [], [], [], []
-            for i in idxs:
-                d = self.data[i]
-                text = d['text']
-                items = {}
-                for sp in d['spo_list']:
-                    subjectid = text.find(sp[0])
-                    objectid = text.find(sp[2])
-                    if subjectid != -1 and objectid != -1:
-                        key = (subjectid, subjectid+len(sp[0]))
-                        if key not in items:
-                            items[key] = []
-                        items[key].append((objectid,
-                                           objectid+len(sp[2]),
-                                           predicate2id[sp[1]]))
-                if items:
-                    T.append([char2id.get(c, 1) for c in text]) # 1是unk，0是padding
-                    s1, s2 = [0] * len(text), [0] * len(text)
-                    for j in items:
-                        s1[j[0]] = 1
-                        s2[j[1]-1] = 1
-                    k1, k2 = choice(list(items.keys()))
-                    o1, o2 = [0] * len(text), [0] * len(text) # 0是unk类（共49+1个类）
-                    for j in items[(k1, k2)]:
-                        o1[j[0]] = j[2]
-                        o2[j[1]-1] = j[2]
-                    S1.append(s1)
-                    S2.append(s2)
-                    K1.append(k1)
-                    K2.append(k2-1)
-                    O1.append(o1)
-                    O2.append(o2)
-                    if len(T) == self.batch_size or i == idxs[-1]:
-                        T = torch.tensor(seq_padding(T))
-                        S1 = torch.FloatTensor(seq_padding(S1))
-                        S2 = torch.FloatTensor(seq_padding(S2))
-                        O1 = torch.tensor(seq_padding(O1))
-                        O2 = torch.tensor(seq_padding(O2))
-                        K1, K2 = torch.tensor(K1), torch.tensor(K2)
-                        yield T, S1, S2, K1, K2, O1, O2
-                        T, S1, S2, K1, K2, O1, O2, = [], [], [], [], [], [], []
+        # while True:
+        idxs = list(range(len(self.data)))
+        np.random.shuffle(idxs)
+        T, S1, S2, K1, K2, O1, O2, = [], [], [], [], [], [], []
+        for i in idxs:
+            d = self.data[i]
+            text = d['text']
+            items = {}
+            for sp in d['spo_list']:
+                subjectid = text.find(sp[0])
+                objectid = text.find(sp[2])
+                if subjectid != -1 and objectid != -1:
+                    key = (subjectid, subjectid+len(sp[0]))
+                    if key not in items:
+                        items[key] = []
+                    items[key].append((objectid,
+                                       objectid+len(sp[2]),
+                                       predicate2id[sp[1]]))
+            if items:
+                T.append([char2id.get(c, 1) for c in text]) # 1是unk，0是padding
+                s1, s2 = [0] * len(text), [0] * len(text)
+                for j in items:
+                    s1[j[0]] = 1
+                    s2[j[1]-1] = 1
+                k1, k2 = choice(list(items.keys()))
+                o1, o2 = [0] * len(text), [0] * len(text) # 0是unk类（共49+1个类）
+                for j in items[(k1, k2)]:
+                    o1[j[0]] = j[2]
+                    o2[j[1]-1] = j[2]
+                S1.append(s1)
+                S2.append(s2)
+                K1.append(k1)
+                K2.append(k2-1)
+                O1.append(o1)
+                O2.append(o2)
+                if len(T) == self.batch_size or i == idxs[-1]:
+                    T = torch.tensor(seq_padding(T))
+                    S1 = torch.FloatTensor(seq_padding(S1))
+                    S2 = torch.FloatTensor(seq_padding(S2))
+                    O1 = torch.tensor(seq_padding(O1))
+                    O2 = torch.tensor(seq_padding(O2))
+                    K1, K2 = torch.tensor(K1), torch.tensor(K2)
+                    yield [T, S1, S2, K1, K2, O1, O2], None
+                    T, S1, S2, K1, K2, O1, O2, = [], [], [], [], [], [], []
 
 train_D = data_generator(train_data)
 
@@ -201,9 +201,10 @@ object_model = ObjectModel()
 
 subject_model.to(device)
 object_model.to(device)
-if n_gpu > 1:
-    torch.nn.DataParallel(subject_model)
-    torch.nn.DataParallel(object_model)
+# if n_gpu > 1:
+#     print(f'let us use {n_gpu} gpu')
+#     torch.nn.DataParallel(subject_model)
+#     torch.nn.DataParallel(object_model)
 
 # loss
 s1_loss_func = nn.BCEWithLogitsLoss()
@@ -255,7 +256,7 @@ for e in range(10):
 
     for batch in train_D:
         batch_idx += 1
-        batch = tuple(t.to(device) for t in batch)
+        batch = tuple(t.to(device) for t in batch[0])
         T, S1, S2, K1, K2, O1, O2 = batch
         pred_s1, pred_s2, x_lstm2_, x_concat_ = subject_model(T)
         pred_o1, pred_o2 = object_model(x_lstm2_, x_concat_, K1, K2)
@@ -268,8 +269,8 @@ for e in range(10):
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
-        if n_gpu > 1:
-            tmp_loss = tmp_loss.mean()
+        # if n_gpu > 1:
+        #     tmp_loss = tmp_loss.mean()
 
         tr_total_loss += tmp_loss.item()
         tmp_loss.backward()

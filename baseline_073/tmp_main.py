@@ -282,6 +282,9 @@ for i in range(EPOCH_NUM):
         loss_sum.backward()
         optimizer.step()
 
+        if step % 10 == 0:
+            print(f'Epoch:{i} - batch:{step}/{loader.dataset}')
+
     torch.save(s_m, 'models_real/s_' + str(i) + '.pkl')
     torch.save(po_m, 'models_real/po_' + str(i) + '.pkl')
     f1, precision, recall = evaluate()
