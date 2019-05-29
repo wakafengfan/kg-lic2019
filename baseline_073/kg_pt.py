@@ -214,8 +214,8 @@ subject_model.to(device)
 object_model.to(device)
 if n_gpu > 1:
     logger.info(f'let us use {n_gpu} gpu')
-    torch.nn.DataParallel(subject_model)
-    torch.nn.DataParallel(object_model)
+    subject_model = torch.nn.DataParallel(subject_model)
+    object_model = torch.nn.DataParallel(object_model)
 
 # loss
 s1_loss_func = nn.BCELoss()
