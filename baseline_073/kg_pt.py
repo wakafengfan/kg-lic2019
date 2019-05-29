@@ -212,10 +212,10 @@ object_model = ObjectModel()
 
 subject_model.to(device)
 object_model.to(device)
-# if n_gpu > 1:
-#     logger.info(f'let us use {n_gpu} gpu')
-#     torch.nn.DataParallel(subject_model)
-#     torch.nn.DataParallel(object_model)
+if n_gpu > 1:
+    logger.info(f'let us use {n_gpu} gpu')
+    torch.nn.DataParallel(subject_model)
+    torch.nn.DataParallel(object_model)
 
 # loss
 s1_loss_func = nn.BCELoss()
@@ -225,7 +225,6 @@ o2_loss_func = nn.CrossEntropyLoss()
 
 params = list(subject_model.parameters()) + list(object_model.parameters())
 optim = optim.Adam(params, lr=0.001)
-# optim_object = optim.Adam(object_model.parameters(), lr=0.001)
 
 def extract_items(text_in):
     R = []
@@ -244,7 +243,7 @@ def extract_items(text_in):
             if _subject:
                 _kk1, _kk2 = torch.tensor([i]), torch.tensor([i+j])
                 with torch.no_grad():
-                    _o1, _o2 = object_model([_t, _t_concat, _kk1, _kk2])
+                    _o1, _o2 = object_model(_t, _t_concat, _kk1, _kk2)
                 _o1, _o2 = np.argmax(_o1[0], 1), np.argmax(_o2[0], 1)
                 for i,_oo1 in enumerate(_o1):
                     if _oo1 > 0:
@@ -281,8 +280,8 @@ for e in range(10):
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
-        # if n_gpu > 1:
-        #     tmp_loss = tmp_loss.mean()
+        if n_gpu > 1:
+            tmp_loss = tmp_loss.mean()
 
         tr_total_loss += tmp_loss.item()
 
