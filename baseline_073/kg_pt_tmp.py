@@ -1,5 +1,4 @@
 import json
-import logging
 from random import choice
 
 import gensim
@@ -11,9 +10,6 @@ import torch.optim as optim
 from tqdm import tqdm
 
 from configuration.config import data_dir, model_dir
-
-logger = logging.getLogger(__name__)
-
 
 train_data = json.load(open(data_dir + '/train_data_me.json'))
 dev_data = json.load(open(data_dir + '/dev_data_me.json'))
@@ -100,14 +96,34 @@ def load_char_embedding():
 
 # pretrained_embeddings = torch.tensor(load_char_embedding(), dtype=torch.float32)
 
+def seq_max_pool(x):
+    """seq是[None, seq_len, s_size]的格式，
+    mask是[None, seq_len, 1]的格式，先除去mask部分，
+    然后再做maxpooling。
+    """
+    seq, mask = x
+    seq = seq - (1 - mask) * 1e10
+    return torch.max(seq, 1)
+
+def seq_and_vec(x):
+    """seq是[None, seq_len, s_size]的格式，
+    vec是[None, v_size]的格式，将vec重复seq_len次，拼到seq上，
+    得到[None, seq_len, s_size+v_size]的向量。
+    """
+    seq, vec = x
+    vec = torch.unsqueeze(vec, 1)
+
+    vec = torch.zeros_like(seq[:, :, :1]) + vec
+    return torch.cat([seq, vec], 2)
+
 class SubjectModel(nn.Module):
     def __init__(self):
         super(SubjectModel, self).__init__()
-        self.embeddings = nn.Embedding(len(char2id)+2, 150)
-        self.lstm1 = nn.LSTM(150, hidden_size // 2, bidirectional=True)
+        self.embeddings = nn.Embedding(len(char2id)+2, hidden_size)
+        self.lstm1 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True)
         self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True)
 
-        self.conv = nn.Conv2d(in_channels=1, out_channels=hidden_size, kernel_size=(3,hidden_size*2), padding=(1,0))
+        self.conv = nn.Conv1d(in_channels=hidden_size*2, out_channels=hidden_size, kernel_size=3, padding=1)
 
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=1)
@@ -135,26 +151,29 @@ class SubjectModel(nn.Module):
         nn.init.constant_(self.linear2.bias, 0)
 
     def forward(self, x_idx):
-        x_masks = torch.eq(x_idx, 0)
+        x_masks = torch.gt(x_idx.unsqueeze(2), 0).type(torch.FloatTensor)  # [b,s,1]
         x_masks.requires_grad = False
 
         x_embed = self.embeddings(x_idx)
         x_embed = F.dropout(x_embed, p=0.25, training=self.training)
 
+        x_embed = x_embed.mul(x_masks)
+
         t, _ = self.lstm1(x_embed)
         t, _ = self.lstm2(t)  # [b,s,h]
 
-        t_max = F.max_pool1d(t.masked_fill(x_masks.unsqueeze(2), -1e10).permute(0,2,1), kernel_size=t.size(1))
-        t_max = t_max.squeeze(-1).unsqueeze(1)  # [b,1,h]
+        t_max, t_max_index = seq_max_pool([t, x_masks])
+        h_ = seq_and_vec([t, t_max])
 
-        t_concat = torch.cat([t, t_max.expand_as(t)], dim=-1)  # [b,s,h*2]
-        t_conv = F.relu(self.conv(t_concat.unsqueeze(1)))  # [b,h,s,1]
-        t_conv = t_conv.squeeze(-1).permute(0,2,1)  # [b,s,h]
+        h = h_.permute(0, 2, 1)
 
-        ps1 = torch.sigmoid(self.linear1(t_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
-        ps2 = torch.sigmoid(self.linear2(t_conv).squeeze(-1))
+        h = self.conv(h)
+        h = h.permute(0, 2, 1)
 
-        return ps1, ps2, t, t_concat
+        ps1 = self.linear1(h)  # [b,s,h]->[b,s,1]->[b,s]
+        ps2 = self.linear2(h)
+
+        return ps1, ps2, t, h_
 
 def gather(indexs, mat):
     tmp_list = []
@@ -210,13 +229,13 @@ object_model = ObjectModel()
 subject_model.to(device)
 object_model.to(device)
 # if n_gpu > 1:
-#     logger.info(f'let us use {n_gpu} gpu')
+#     print(f'let us use {n_gpu} gpu')
 #     torch.nn.DataParallel(subject_model)
 #     torch.nn.DataParallel(object_model)
 
 # loss
-s1_loss_func = nn.BCELoss()
-s2_loss_func = nn.BCELoss()
+s1_loss_func = nn.BCEWithLogitsLoss()
+s2_loss_func = nn.BCEWithLogitsLoss()
 o1_loss_func = nn.CrossEntropyLoss()
 o2_loss_func = nn.CrossEntropyLoss()
 
@@ -270,8 +289,8 @@ for e in range(10):
         pred_s1, pred_s2, x_lstm2_, x_concat_ = subject_model(T)
         pred_o1, pred_o2 = object_model(x_lstm2_, x_concat_, K1, K2)
 
-        s1_loss = s1_loss_func(pred_s1, S1)
-        s2_loss = s2_loss_func(pred_s2, S2)
+        s1_loss = s1_loss_func(pred_s1, S1.unsqueeze(2))
+        s2_loss = s2_loss_func(pred_s2, S2.unsqueeze(2))
 
         o1_loss = o1_loss_func(pred_o1.permute(0,2,1), O1)  # [b,s]
         o2_loss = o2_loss_func(pred_o2.permute(0,2,1), O2)
@@ -288,7 +307,7 @@ for e in range(10):
         optim.step()
 
         if batch_idx % 10 == 0:
-            logger.info(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss/batch_idx:.4f}')
+            print(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss/batch_idx:.4f}')
 
     subject_model.eval()
     object_model.eval()
@@ -310,7 +329,7 @@ for e in range(10):
         # torch.save(s_model_to_save.state_dict(), model_dir + '/subject_model.pt')
         # torch.save(o_model_to_save.state_dict(), model_dir + '/object_model.pt')
 
-    logger.info(f'Epoch:{e} - best f1: {best_score:.4f}')
+    print(f'Epoch:{e} - best f1: {best_score:.4f}')
 
 
 
