@@ -101,12 +101,13 @@ def load_char_embedding():
             char_embed[cid] = char_embed_model.word_vec(c)
     return char_embed
 
-# pretrained_embeddings = torch.tensor(load_char_embedding(), dtype=torch.float32)
+pretrained_embeddings = torch.tensor(load_char_embedding(), dtype=torch.float32)
 
 class SubjectModel(nn.Module):
     def __init__(self):
         super(SubjectModel, self).__init__()
-        self.embeddings = nn.Embedding(len(char2id)+2, 150)
+        # self.embeddings = nn.Embedding(len(char2id)+2, 150)
+        self.embeddings = nn.Embedding.from_pretrained(pretrained_embeddings)
         self.lstm1 = nn.LSTM(150, hidden_size // 2, bidirectional=True)
         self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True)
 
@@ -115,7 +116,7 @@ class SubjectModel(nn.Module):
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=1)
 
-        # self._init_params()
+        self._init_params()
 
     def _init_params(self):
         nn.init.orthogonal_(getattr(self.lstm1, 'weight_hh_l0'))
@@ -127,6 +128,18 @@ class SubjectModel(nn.Module):
         nn.init.kaiming_normal_(getattr(self.lstm2, 'weight_ih_l0'))
         nn.init.constant_(getattr(self.lstm2, 'bias_hh_l0'), 0)
         nn.init.constant_(getattr(self.lstm2, 'bias_ih_l0'), 0)
+        getattr(self.rnn, f'bias_hh_l{0}').chunk(4)[1].fill_(1)
+
+        if self.rnn.bidirectional:
+            nn.init.orthogonal_(
+                getattr(self.rnn, f'weight_hh_l{0}_reverse'))
+            nn.init.kaiming_normal_(
+                getattr(self.rnn, f'weight_ih_l{0}_reverse'))
+            nn.init.constant_(
+                getattr(self.rnn, f'bias_hh_l{0}_reverse'), val=0)
+            nn.init.constant_(
+                getattr(self.rnn, f'bias_ih_l{0}_reverse'), val=0)
+            getattr(self.rnn, f'bias_hh_l{0}_reverse').chunk(4)[1].fill_(1)
 
         nn.init.xavier_normal_(self.conv.weight)
         nn.init.constant_(self.conv.bias, 0)
@@ -159,11 +172,10 @@ class SubjectModel(nn.Module):
 
         return ps1, ps2, t, t_concat
 
+
 def gather(indexs, mat):
     tmp_list = []
     batch_size = mat.size(0)
-    # batch_idxs = torch.arange(batch_size)
-    # indexs = torch.cat([batch_idxs.unsqueeze(1), indexs.unsqueeze(1)], dim=1)
     for i in range(batch_size):
         tmp_list.append(mat[i][indexs[i]])
     return torch.stack(tmp_list)
@@ -176,7 +188,7 @@ class ObjectModel(nn.Module):
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=num_classes+1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=num_classes+1)
 
-        # self._init_params()
+        self._init_params()
 
     def _init_params(self):
         nn.init.xavier_normal_(self.conv.weight)
