@@ -157,7 +157,7 @@ class SubjectModel(nn.Module):
         x_masks.requires_grad = False
 
         x_embed = self.embeddings(x_idx)
-        x_embed = F.dropout(x_embed, p=0.25, training=self.training)
+        # x_embed = F.dropout(x_embed, p=0.25, training=self.training)
 
         t, _ = self.lstm1(x_embed)
         t, _ = self.lstm2(t)  # [b,s,h]
@@ -169,8 +169,8 @@ class SubjectModel(nn.Module):
         t_conv = F.relu(self.conv(t_concat.unsqueeze(1)))  # [b,h,s,1]
         t_conv = t_conv.squeeze(-1).permute(0,2,1)  # [b,s,h]
 
-        ps1 = torch.sigmoid(self.linear1(t_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
-        ps2 = torch.sigmoid(self.linear2(t_conv).squeeze(-1))
+        ps1 = self.linear1(t_conv).squeeze(-1)  # [b,s,h]->[b,s,1]->[b,s]
+        ps2 = self.linear2(t_conv).squeeze(-1)
 
         return ps1, ps2, t, t_concat
 
@@ -226,16 +226,14 @@ object_model = ObjectModel()
 
 subject_model.to(device)
 object_model.to(device)
-if n_gpu > 1:
-    logger.info(f'let us use {n_gpu} gpu')
-    subject_model = torch.nn.DataParallel(subject_model)
-    object_model = torch.nn.DataParallel(object_model)
+# if n_gpu > 1:
+#     logger.info(f'let us use {n_gpu} gpu')
+#     subject_model = torch.nn.DataParallel(subject_model)
+#     object_model = torch.nn.DataParallel(object_model)
 
 # loss
-s1_loss_func = nn.BCELoss()
-s2_loss_func = nn.BCELoss()
-o1_loss_func = nn.CrossEntropyLoss()
-o2_loss_func = nn.CrossEntropyLoss()
+b_loss_func = nn.BCEWithLogitsLoss()
+loss_func = nn.CrossEntropyLoss()
 
 params = list(subject_model.parameters()) + list(object_model.parameters())
 optim = optim.Adam(params, lr=0.001)
@@ -288,16 +286,16 @@ for e in range(10):
         pred_s1, pred_s2, x_lstm2_, x_concat_ = subject_model(T)
         pred_o1, pred_o2 = object_model(x_lstm2_, x_concat_, K1, K2)
 
-        s1_loss = s1_loss_func(pred_s1, S1)
-        s2_loss = s2_loss_func(pred_s2, S2)
+        s1_loss = b_loss_func(pred_s1, S1)
+        s2_loss = b_loss_func(pred_s2, S2)
 
-        o1_loss = o1_loss_func(pred_o1.permute(0,2,1), O1)  # [b,s]
-        o2_loss = o2_loss_func(pred_o2.permute(0,2,1), O2)
+        o1_loss = loss_func(pred_o1.permute(0,2,1), O1)  # [b,s]
+        o2_loss = loss_func(pred_o2.permute(0,2,1), O2)
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
-        if n_gpu > 1:
-            tmp_loss = tmp_loss.mean()
+        # if n_gpu > 1:
+        #     tmp_loss = tmp_loss.mean()
 
         tr_total_loss += tmp_loss.item()
 
