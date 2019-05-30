@@ -281,7 +281,7 @@ def extract_items(text_in):
 
 best_score = 0
 best_epoch = 0
-for e in range(10):
+for e in range(100):
     subject_model.train()
     object_model.train()
     batch_idx = 0
