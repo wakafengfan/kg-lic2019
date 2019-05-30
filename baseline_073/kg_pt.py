@@ -26,8 +26,11 @@ id2predicate = {int(i):j for i,j in id2predicate.items()}
 
 id2char, char2id = json.load(open(data_dir + '/all_chars_me.json'))
 
-hidden_size = 128
+hidden_size = 256
 num_classes = len(id2predicate)
+
+if torch.cuda.is_available():
+    torch.backends.cudnn.benchmark = True
 
 def seq_padding(X):
     L = [len(x) for x in X]
@@ -107,8 +110,8 @@ class SubjectModel(nn.Module):
     def __init__(self):
         super(SubjectModel, self).__init__()
         # self.embeddings = nn.Embedding(len(char2id)+2, 150)
-        self.embeddings = nn.Embedding.from_pretrained(pretrained_embeddings)
-        self.lstm1 = nn.LSTM(150, hidden_size // 2, bidirectional=True, batch_first=True)
+        self.embeddings = nn.Embedding(len(char2id)+2, hidden_size)
+        self.lstm1 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
         self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
 
         self.conv = nn.Conv1d(in_channels=hidden_size*2,
@@ -222,7 +225,7 @@ class ObjectModel(nn.Module):
         return po1, po2
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 n_gpu = torch.cuda.device_count()
 
 subject_model = SubjectModel()
@@ -230,10 +233,10 @@ object_model = ObjectModel()
 
 subject_model.to(device)
 object_model.to(device)
-# if n_gpu > 1:
-#     logger.info(f'let us use {n_gpu} gpu')
-#     subject_model = torch.nn.DataParallel(subject_model)
-#     object_model = torch.nn.DataParallel(object_model)
+if n_gpu > 1:
+    logger.info(f'let us use {n_gpu} gpu')
+    subject_model = torch.nn.DataParallel(subject_model)
+    object_model = torch.nn.DataParallel(object_model)
 
 # loss
 b_loss_func = nn.BCELoss()
@@ -270,6 +273,7 @@ def extract_items(text_in):
                                 _object = text_in[i: i+j+1]
                                 _predicate = id2predicate[_oo1]
                                 R.append((_subject, _predicate, _object))
+                                logger.info(f'{_subject} {_predicate} {_object}')
                                 break
     return list(set(R))
 
@@ -299,8 +303,8 @@ for e in range(10):
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
-        # if n_gpu > 1:
-        #     tmp_loss = tmp_loss.mean()
+        if n_gpu > 1:
+            tmp_loss = tmp_loss.mean()
 
         tr_total_loss += tmp_loss.item()
 
@@ -324,6 +328,7 @@ for e in range(10):
     f1, precision, recall = 2 * A / (B + C), A / B, A / C
     if f1 > best_score:
         best_score = f1
+        best_epoch = e
 
         # s_model_to_save = subject_model.module if hasattr(subject_model, 'module') else subject_model
         # o_model_to_save = object_model.module if hasattr(object_model, 'module') else object_model
