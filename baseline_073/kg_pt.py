@@ -123,12 +123,13 @@ class SubjectModel(nn.Module):
         nn.init.kaiming_normal_(getattr(self.lstm1, 'weight_ih_l0'))
         nn.init.constant_(getattr(self.lstm1, 'bias_hh_l0'), 0)
         nn.init.constant_(getattr(self.lstm1, 'bias_ih_l0'), 0)
+        getattr(self.lstm1, f'bias_hh_l{0}').chunk(4)[1].fill_(1)
 
         nn.init.orthogonal_(getattr(self.lstm2, 'weight_hh_l0'))
         nn.init.kaiming_normal_(getattr(self.lstm2, 'weight_ih_l0'))
         nn.init.constant_(getattr(self.lstm2, 'bias_hh_l0'), 0)
         nn.init.constant_(getattr(self.lstm2, 'bias_ih_l0'), 0)
-        getattr(self.rnn, f'bias_hh_l{0}').chunk(4)[1].fill_(1)
+        getattr(self.lstm2, f'bias_hh_l{0}').chunk(4)[1].fill_(1)
 
         nn.init.orthogonal_(getattr(self.lstm1, f'weight_hh_l{0}_reverse'))
         nn.init.kaiming_normal_(getattr(self.lstm1, f'weight_ih_l{0}_reverse'))
