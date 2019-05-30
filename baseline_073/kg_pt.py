@@ -108,8 +108,8 @@ class SubjectModel(nn.Module):
         super(SubjectModel, self).__init__()
         # self.embeddings = nn.Embedding(len(char2id)+2, 150)
         self.embeddings = nn.Embedding.from_pretrained(pretrained_embeddings)
-        self.lstm1 = nn.LSTM(150, hidden_size // 2, bidirectional=True)
-        self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True)
+        self.lstm1 = nn.LSTM(150, hidden_size // 2, bidirectional=True, batch_first=True)
+        self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
 
         self.conv = nn.Conv2d(in_channels=1, out_channels=hidden_size, kernel_size=(3,hidden_size*2), padding=(1,0))
 
