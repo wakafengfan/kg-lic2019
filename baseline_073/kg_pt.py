@@ -111,7 +111,10 @@ class SubjectModel(nn.Module):
         self.lstm1 = nn.LSTM(150, hidden_size // 2, bidirectional=True, batch_first=True)
         self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
 
-        self.conv = nn.Conv2d(in_channels=1, out_channels=hidden_size, kernel_size=(3,hidden_size*2), padding=(1,0))
+        self.conv = nn.Conv1d(in_channels=hidden_size*2,
+                              out_channels=hidden_size,
+                              kernel_size=3,
+                              padding=1)
 
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=1)
@@ -166,8 +169,7 @@ class SubjectModel(nn.Module):
         t_max = t_max.squeeze(-1).unsqueeze(1)  # [b,1,h]
 
         t_concat = torch.cat([t, t_max.expand_as(t)], dim=-1)  # [b,s,h*2]
-        t_conv = F.relu(self.conv(t_concat.unsqueeze(1)))  # [b,h,s,1]
-        t_conv = t_conv.squeeze(-1).permute(0,2,1)  # [b,s,h]
+        t_conv = F.relu(self.conv(t_concat.permute(0, 2, 1))).permute(0,2,1)  # [b,s,h]
 
         ps1 = torch.sigmoid(self.linear1(t_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
         ps2 = torch.sigmoid(self.linear2(t_conv).squeeze(-1))
@@ -186,7 +188,10 @@ def gather(indexs, mat):
 class ObjectModel(nn.Module):
     def __init__(self):
         super(ObjectModel, self).__init__()
-        self.conv = nn.Conv2d(in_channels=1, out_channels=hidden_size, kernel_size=(3,hidden_size*4), padding=(1,0))
+        self.conv = nn.Conv1d(in_channels=hidden_size*4,
+                              out_channels=hidden_size,
+                              kernel_size=3,
+                              padding=1)
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=num_classes+1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=num_classes+1)
 
@@ -209,8 +214,7 @@ class ObjectModel(nn.Module):
         k = torch.cat([k1, k2], dim=1)  # [b,h*2]
         h = torch.cat([t_concat, k.unsqueeze(1).to(torch.float32).expand_as(t_concat)], dim=2)  # [b,s,h*4]
 
-        h_conv = F.relu(self.conv(h.unsqueeze(1)))  # [b,h,s]
-        h_conv = h_conv.squeeze(3).permute(0,2,1)  # [b,s,h]
+        h_conv = F.relu(self.conv(h.permute(0,2,1))).permute(0,2,1)  # [b,s,h]
 
         po1 = self.linear1(h_conv)  # [b,s,num_class]
         po2 = self.linear2(h_conv)
