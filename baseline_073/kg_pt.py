@@ -304,7 +304,7 @@ for e in range(10):
         tmp_loss.backward()
         optim.step()
 
-        if batch_idx % 10 == 0:
+        if batch_idx % 100 == 0:
             logger.info(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss/batch_idx:.4f}')
 
     subject_model.eval()
