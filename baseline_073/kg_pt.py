@@ -1,5 +1,7 @@
 import json
 import logging
+from collections import defaultdict
+from pathlib import Path
 from random import choice
 
 import gensim
@@ -104,12 +106,11 @@ def load_char_embedding():
             char_embed[cid] = char_embed_model.word_vec(c)
     return char_embed
 
-pretrained_embeddings = torch.tensor(load_char_embedding(), dtype=torch.float32)
+# pretrained_embeddings = torch.tensor(load_char_embedding(), dtype=torch.float32)
 
 class SubjectModel(nn.Module):
     def __init__(self):
         super(SubjectModel, self).__init__()
-        # self.embeddings = nn.Embedding(len(char2id)+2, 150)
         self.embeddings = nn.Embedding(len(char2id)+2, hidden_size)
         self.lstm1 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
         self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
@@ -273,15 +274,15 @@ def extract_items(text_in):
                                 _object = text_in[i: i+j+1]
                                 _predicate = id2predicate[_oo1]
                                 R.append((_subject, _predicate, _object))
-                                logger.info(f'{_subject} {_predicate} {_object}')
                                 break
     return list(set(R))
 
-
+err_log = (Path(data_dir) / 'err_log.json').open('w')
+err_dict = defaultdict(list)
 
 best_score = 0
 best_epoch = 0
-for e in range(100):
+for e in range(50):
     subject_model.train()
     object_model.train()
     batch_idx = 0
@@ -290,6 +291,7 @@ for e in range(100):
 
     for batch in train_D:
         batch_idx += 1
+
         batch = tuple(t.to(device) for t in batch[0])
         T, S1, S2, K1, K2, O1, O2 = batch
         pred_s1, pred_s2, x_lstm2_, x_concat_ = subject_model(T)
@@ -325,10 +327,17 @@ for e in range(100):
         B += len(R)
         C += len(T)
 
+        if R != T:
+            err_dict['err'].append({'text': d['text'],
+                                    'spo_list': d['spo_list'],
+                                    'predict': list(R)})
+
     f1, precision, recall = 2 * A / (B + C), A / B, A / C
     if f1 > best_score:
         best_score = f1
         best_epoch = e
+
+        json.dump(err_dict, err_log, ensure_ascii=False)
 
         # s_model_to_save = subject_model.module if hasattr(subject_model, 'module') else subject_model
         # o_model_to_save = object_model.module if hasattr(object_model, 'module') else object_model
