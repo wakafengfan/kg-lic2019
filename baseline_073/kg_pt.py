@@ -169,8 +169,8 @@ class SubjectModel(nn.Module):
         t_conv = F.relu(self.conv(t_concat.unsqueeze(1)))  # [b,h,s,1]
         t_conv = t_conv.squeeze(-1).permute(0,2,1)  # [b,s,h]
 
-        ps1 = self.linear1(t_conv).squeeze(-1)  # [b,s,h]->[b,s,1]->[b,s]
-        ps2 = self.linear2(t_conv).squeeze(-1)
+        ps1 = torch.sigmoid(self.linear1(t_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
+        ps2 = torch.sigmoid(self.linear2(t_conv).squeeze(-1))
 
         return ps1, ps2, t, t_concat
 
@@ -232,7 +232,7 @@ object_model.to(device)
 #     object_model = torch.nn.DataParallel(object_model)
 
 # loss
-b_loss_func = nn.BCEWithLogitsLoss()
+b_loss_func = nn.BCELoss()
 loss_func = nn.CrossEntropyLoss()
 
 params = list(subject_model.parameters()) + list(object_model.parameters())
