@@ -243,8 +243,10 @@ def extract_items(text_in):
             if _subject:
                 _kk1, _kk2 = torch.tensor([i]), torch.tensor([i+j])
                 with torch.no_grad():
-                    _o1, _o2 = object_model(_t, _t_concat, _kk1, _kk2)
-                _o1, _o2 = np.argmax(_o1[0], 1), np.argmax(_o2[0], 1)
+                    _o1, _o2 = object_model(_t, _t_concat, _kk1, _kk2)  # [b,s,50]
+                _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
+                _o1 = _o1.detach().cpu().numpy()
+                _o2 = _o2.detach().cpu().numpy()
                 for i,_oo1 in enumerate(_o1):
                     if _oo1 > 0:
                         for j,_oo2 in enumerate(_o2[i:]):
