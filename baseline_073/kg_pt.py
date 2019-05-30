@@ -272,6 +272,7 @@ def extract_items(text_in):
 
 
 best_score = 0
+best_epoch = 0
 for e in range(10):
     subject_model.train()
     object_model.train()
@@ -320,13 +321,13 @@ for e in range(10):
     if f1 > best_score:
         best_score = f1
 
-        s_model_to_save = subject_model.module if hasattr(subject_model, 'module') else subject_model
-        o_model_to_save = object_model.module if hasattr(object_model, 'module') else object_model
+        # s_model_to_save = subject_model.module if hasattr(subject_model, 'module') else subject_model
+        # o_model_to_save = object_model.module if hasattr(object_model, 'module') else object_model
 
         # torch.save(s_model_to_save.state_dict(), model_dir + '/subject_model.pt')
         # torch.save(o_model_to_save.state_dict(), model_dir + '/object_model.pt')
 
-    logger.info(f'Epoch:{e} - best f1: {best_score:.4f}')
+    logger.info(f'Epoch:{e}-precision:{precision:.4f}-recall:{recall:.4f}-f1:{f1:.4f} - best f1: {best_score:.4f} - best epoch:{best_epoch}')
 
 
 
