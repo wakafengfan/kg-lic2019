@@ -225,7 +225,7 @@ class ObjectModel(nn.Module):
         return po1, po2
 
 
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 n_gpu = torch.cuda.device_count()
 
 subject_model = SubjectModel()
