@@ -175,7 +175,7 @@ class SubjectModel(nn.Module):
         t, _ = self.lstm2(t)  # [b,s,h]
         t, _ = torch.nn.utils.rnn.pad_packed_sequence(t, batch_first=True)
 
-        print(t.size(), x_mask_.size())
+        print(t.size(), x_masks.size())
 
         t_max = F.max_pool1d(t.masked_fill(x_masks.unsqueeze(2), -1e10).permute(0,2,1), kernel_size=t.size(1))
         t_max = t_max.squeeze(-1).unsqueeze(1)  # [b,1,h]
