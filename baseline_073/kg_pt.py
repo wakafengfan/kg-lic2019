@@ -242,10 +242,10 @@ object_model = ObjectModel()
 
 subject_model.to(device)
 object_model.to(device)
-if n_gpu > 1:
-    logger.info(f'let us use {n_gpu} gpu')
-    subject_model = torch.nn.DataParallel(subject_model)
-    object_model = torch.nn.DataParallel(object_model)
+# if n_gpu > 1:
+#     logger.info(f'let us use {n_gpu} gpu')
+#     subject_model = torch.nn.DataParallel(subject_model)
+#     object_model = torch.nn.DataParallel(object_model)
 
 # loss
 b_loss_func = nn.BCELoss(reduction='none')
@@ -329,8 +329,8 @@ for e in range(50):
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
-        if n_gpu > 1:
-            tmp_loss = tmp_loss.mean()
+        # if n_gpu > 1:
+        #     tmp_loss = tmp_loss.mean()
 
         tr_total_loss += tmp_loss.item()
 
