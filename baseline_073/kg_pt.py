@@ -35,9 +35,11 @@ if torch.cuda.is_available():
     torch.backends.cudnn.benchmark = True
 
 def seq_padding(X):
-    L = [len(x) for x in X]
+    X_L = sorted(np.stack([np.array(X), np.array(list(map(len, X)))], axis=1), key=lambda x: x[1], reverse=True)
+    X, L = zip(*X_L)
     ML = max(L)
-    return [x + [0] * (ML - len(x)) for x in X]
+
+    return [x + [0] * (ML - len(x)) for x in X], L
 
 
 class data_generator:
@@ -86,13 +88,15 @@ class data_generator:
                 O1.append(o1)
                 O2.append(o2)
                 if len(T) == self.batch_size or i == idxs[-1]:
-                    T = torch.tensor(seq_padding(T))
-                    S1 = torch.FloatTensor(seq_padding(S1))
-                    S2 = torch.FloatTensor(seq_padding(S2))
-                    O1 = torch.tensor(seq_padding(O1))
-                    O2 = torch.tensor(seq_padding(O2))
+                    T, Ls  = seq_padding(T)
+                    T = torch.tensor(T)
+                    Ls = torch.tensor(Ls)
+                    S1 = torch.FloatTensor(seq_padding(S1)[0])
+                    S2 = torch.FloatTensor(seq_padding(S2)[0])
+                    O1 = torch.tensor(seq_padding(O1)[0])
+                    O2 = torch.tensor(seq_padding(O2)[0])
                     K1, K2 = torch.tensor(K1), torch.tensor(K2)
-                    yield [T, S1, S2, K1, K2, O1, O2], None
+                    yield [T, S1, S2, K1, K2, O1, O2, Ls], None
                     T, S1, S2, K1, K2, O1, O2, = [], [], [], [], [], [], []
 
 train_D = data_generator(train_data)
@@ -159,15 +163,17 @@ class SubjectModel(nn.Module):
         nn.init.kaiming_normal_(self.linear2.weight)
         nn.init.constant_(self.linear2.bias, 0)
 
-    def forward(self, x_idx):
+    def forward(self, x_idx, x_length):
         x_masks = torch.eq(x_idx, 0)
         x_masks.requires_grad = False
 
         x_embed = self.embeddings(x_idx)
-        # x_embed = F.dropout(x_embed, p=0.25, training=self.training)
+        x_embed = F.dropout(x_embed, p=0.25, training=self.training)
 
-        t, _ = self.lstm1(x_embed)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(x_embed, x_length, batch_first=True)
+        t, _ = self.lstm1(packed)
         t, _ = self.lstm2(t)  # [b,s,h]
+        t, _ = torch.nn.utils.rnn.pad_packed_sequence(t, batch_first=True)
 
         t_max = F.max_pool1d(t.masked_fill(x_masks.unsqueeze(2), -1e10).permute(0,2,1), kernel_size=t.size(1))
         t_max = t_max.squeeze(-1).unsqueeze(1)  # [b,1,h]
@@ -178,7 +184,7 @@ class SubjectModel(nn.Module):
         ps1 = torch.sigmoid(self.linear1(t_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
         ps2 = torch.sigmoid(self.linear2(t_conv).squeeze(-1))
 
-        return ps1, ps2, t, t_concat
+        return ps1, ps2, t, t_concat, (1-x_masks).type(torch.float32)
 
 
 def gather(indexs, mat):
@@ -251,7 +257,10 @@ def extract_items(text_in):
     _s = [char2id.get(c, 1) for c in text_in]
     _s = torch.tensor([_s])
     with torch.no_grad():
-        _k1, _k2, _t, _t_concat = subject_model(_s.to(device))
+        _k1, _k2, _t, _t_concat, _t_mask = subject_model(_s.to(device))
+        _k1 *= _t_mask
+        _k2 *= _t_mask
+
     _k1, _k2 = _k1[0, :], _k2[0, :]
     for i,_kk1 in enumerate(_k1):
         if _kk1 > 0.5:
@@ -264,6 +273,8 @@ def extract_items(text_in):
                 _kk1, _kk2 = torch.tensor([i]), torch.tensor([i+j])
                 with torch.no_grad():
                     _o1, _o2 = object_model(_t, _t_concat, _kk1, _kk2)  # [b,s,50]
+                    _o1 *= _t_mask.unsqueeze(2).expand_as(_o1)
+                    _o2 *= _t_mask.unsqueeze(2).expand_as(_o1)
                 _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
                 _o1 = _o1.detach().cpu().numpy()
                 _o2 = _o2.detach().cpu().numpy()
@@ -293,12 +304,18 @@ for e in range(50):
         batch_idx += 1
 
         batch = tuple(t.to(device) for t in batch[0])
-        T, S1, S2, K1, K2, O1, O2 = batch
-        pred_s1, pred_s2, x_lstm2_, x_concat_ = subject_model(T)
+        T, S1, S2, K1, K2, O1, O2, Ls = batch
+        pred_s1, pred_s2, x_lstm2_, x_concat_, x_mask_ = subject_model(T, Ls)
         pred_o1, pred_o2 = object_model(x_lstm2_, x_concat_, K1, K2)
+
+        pred_s1 *= x_mask_
+        pred_s2 *= x_mask_
 
         s1_loss = b_loss_func(pred_s1, S1)
         s2_loss = b_loss_func(pred_s2, S2)
+
+        pred_o1 *= x_mask_.unsqueeze(2).expand_as(pred_o1)
+        pred_o2 *= x_mask_.unsqueeze(2).expand_as(pred_o1)
 
         o1_loss = loss_func(pred_o1.permute(0,2,1), O1)  # [b,s]
         o2_loss = loss_func(pred_o2.permute(0,2,1), O2)
@@ -315,7 +332,7 @@ for e in range(50):
         optim.step()
 
         if batch_idx % 100 == 0:
-            logger.info(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss/batch_idx:.4f}')
+            logger.info(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss/batch_idx:.8f}')
 
     subject_model.eval()
     object_model.eval()
