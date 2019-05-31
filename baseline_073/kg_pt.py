@@ -175,8 +175,6 @@ class SubjectModel(nn.Module):
         t, _ = self.lstm2(t)  # [b,s,h]
         t, _ = torch.nn.utils.rnn.pad_packed_sequence(t, batch_first=True)
 
-        print(t.size(), x_masks.size())
-
         t_max = F.max_pool1d(t.masked_fill(x_masks.unsqueeze(2), -1e10).permute(0,2,1), kernel_size=t.size(1))
         t_max = t_max.squeeze(-1).unsqueeze(1)  # [b,1,h]
 
@@ -257,9 +255,10 @@ optim = optim.Adam(params, lr=0.001)
 def extract_items(text_in):
     R = []
     _s = [char2id.get(c, 1) for c in text_in]
+    _l = torch.tensor([len(_s)])
     _s = torch.tensor([_s])
     with torch.no_grad():
-        _k1, _k2, _t, _t_concat, _t_mask = subject_model(_s.to(device))
+        _k1, _k2, _t, _t_concat, _t_mask = subject_model(_s.to(device), _l.to(device))
         _k1.masked_fill_(_t_mask, 0)
         _k2.masked_fill_(_t_mask, 0)
 
@@ -322,10 +321,11 @@ for e in range(50):
         o1_loss.masked_fill_(x_mask_, 0)
         o2_loss.masked_fill_(x_mask_, 0)
 
-        s1_loss = torch.sum(s1_loss)/torch.sum(1-x_mask_)
-        s2_loss = torch.sum(s2_loss)/torch.sum(1-x_mask_)
-        o1_loss = torch.sum(o1_loss)/torch.sum(1-x_mask_)
-        o2_loss = torch.sum(o2_loss)/torch.sum(1-x_mask_)
+        total_ele = torch.sum(1-x_mask_)
+        s1_loss = torch.sum(s1_loss)/total_ele
+        s2_loss = torch.sum(s2_loss)/total_ele
+        o1_loss = torch.sum(o1_loss)/total_ele
+        o2_loss = torch.sum(o2_loss)/total_ele
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
