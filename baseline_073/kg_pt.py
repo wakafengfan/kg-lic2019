@@ -184,7 +184,7 @@ class SubjectModel(nn.Module):
         ps1 = torch.sigmoid(self.linear1(t_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
         ps2 = torch.sigmoid(self.linear2(t_conv).squeeze(-1))
 
-        return ps1, ps2, t, t_concat, (1-x_masks).type(torch.float32)
+        return ps1, ps2, t, t_concat, x_masks
 
 
 def gather(indexs, mat):
@@ -246,8 +246,8 @@ if n_gpu > 1:
     object_model = torch.nn.DataParallel(object_model)
 
 # loss
-b_loss_func = nn.BCELoss()
-loss_func = nn.CrossEntropyLoss()
+b_loss_func = nn.BCELoss(reduction='none')
+loss_func = nn.CrossEntropyLoss(reduction='none')
 
 params = list(subject_model.parameters()) + list(object_model.parameters())
 optim = optim.Adam(params, lr=0.001)
@@ -258,8 +258,8 @@ def extract_items(text_in):
     _s = torch.tensor([_s])
     with torch.no_grad():
         _k1, _k2, _t, _t_concat, _t_mask = subject_model(_s.to(device))
-        _k1 *= _t_mask
-        _k2 *= _t_mask
+        _k1.masked_fill_(_t_mask, 0)
+        _k2.masked_fill_(_t_mask, 0)
 
     _k1, _k2 = _k1[0, :], _k2[0, :]
     for i,_kk1 in enumerate(_k1):
@@ -273,8 +273,8 @@ def extract_items(text_in):
                 _kk1, _kk2 = torch.tensor([i]), torch.tensor([i+j])
                 with torch.no_grad():
                     _o1, _o2 = object_model(_t, _t_concat, _kk1, _kk2)  # [b,s,50]
-                    _o1 *= _t_mask.unsqueeze(2).expand_as(_o1)
-                    _o2 *= _t_mask.unsqueeze(2).expand_as(_o1)
+                    _o1.masked_fill_(_t_mask.unsqueeze(2), 0)
+                    _o2.masked_fill_(_t_mask.unsqueeze(2), 0)
                 _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
                 _o1 = _o1.detach().cpu().numpy()
                 _o2 = _o2.detach().cpu().numpy()
@@ -308,17 +308,22 @@ for e in range(50):
         pred_s1, pred_s2, x_lstm2_, x_concat_, x_mask_ = subject_model(T, Ls)
         pred_o1, pred_o2 = object_model(x_lstm2_, x_concat_, K1, K2)
 
-        pred_s1 *= x_mask_
-        pred_s2 *= x_mask_
-
-        s1_loss = b_loss_func(pred_s1, S1)
+        s1_loss = b_loss_func(pred_s1, S1)  # [b,s]
         s2_loss = b_loss_func(pred_s2, S2)
 
-        pred_o1 *= x_mask_.unsqueeze(2).expand_as(pred_o1)
-        pred_o2 *= x_mask_.unsqueeze(2).expand_as(pred_o1)
+        s1_loss.masked_fill_(x_mask_, 0)
+        s2_loss.masked_fill_(x_mask_, 0)
 
         o1_loss = loss_func(pred_o1.permute(0,2,1), O1)  # [b,s]
         o2_loss = loss_func(pred_o2.permute(0,2,1), O2)
+
+        o1_loss.masked_fill_(x_mask_, 0)
+        o2_loss.masked_fill_(x_mask_, 0)
+
+        s1_loss = torch.sum(s1_loss)/torch.sum(1-x_mask_)
+        s2_loss = torch.sum(s2_loss)/torch.sum(1-x_mask_)
+        o1_loss = torch.sum(o1_loss)/torch.sum(1-x_mask_)
+        o2_loss = torch.sum(o2_loss)/torch.sum(1-x_mask_)
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
