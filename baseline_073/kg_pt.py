@@ -123,7 +123,7 @@ class SubjectModel(nn.Module):
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=1)
 
-        self._init_params()
+        # self._init_params()
 
     def _init_params(self):
         nn.init.orthogonal_(getattr(self.lstm1, 'weight_hh_l0'))
@@ -199,7 +199,7 @@ class ObjectModel(nn.Module):
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=num_classes+1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=num_classes+1)
 
-        self._init_params()
+        # self._init_params()
 
     def _init_params(self):
         nn.init.xavier_normal_(self.conv.weight)
