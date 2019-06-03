@@ -198,6 +198,7 @@ class ObjectModel(nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 n_gpu = torch.cuda.device_count()
+logger.info(f'use {n_gpu} gpu')
 
 subject_model = SubjectModel.from_pretrained(pretrained_model_name_or_path=bert_model_path, cache_dir=bert_data_path)
 object_model = ObjectModel()
@@ -243,6 +244,7 @@ def extract_items(text_in):
 
     _t_mask = 1 - _input_mask
     _t_mask = _t_mask.type(torch.ByteTensor)
+    _t_mask.to(device)
 
     with torch.no_grad():
         _k1, _k2, _t_b = subject_model(_s.to(device),
@@ -305,6 +307,7 @@ for e in range(epoch_num):
         x_mask_ = 1 - TM
         x_mask_.requires_grad = False
         x_mask_ = x_mask_.type(torch.ByteTensor)
+        x_mask_.to(device)
 
         s1_loss.masked_fill_(x_mask_, 0)
         s2_loss.masked_fill_(x_mask_, 0)
