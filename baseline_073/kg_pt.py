@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 
-from configuration.config import data_dir, model_dir
+from configuration.config import data_dir
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -369,52 +369,5 @@ for e in range(50):
         # torch.save(s_model_to_save.state_dict(), model_dir + '/subject_model.pt')
         # torch.save(o_model_to_save.state_dict(), model_dir + '/object_model.pt')
 
-    logger.info(f'Epoch:{e}-precision:{precision:.4f}-recall:{recall:.4f}-f1:{f1:.4f} - best f1: {best_score:.4f} - best epoch:{best_epoch}')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    logger.info(f'Epoch:{e}-precision:{precision:.4f}-recall:{recall:.4f}-f1:{f1:.4f} - best f1:{best_score:.4f} - best epoch:{best_epoch}')
 
