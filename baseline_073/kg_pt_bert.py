@@ -1,17 +1,20 @@
+import collections
 import json
 import logging
+import random
+import re
 from collections import defaultdict
 from pathlib import Path
+from random import choice
 
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
 from pytorch_pretrained_bert import BertTokenizer, BertAdam
 from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
 from tqdm import tqdm
 
-from configuration.config import data_dir, bert_vocab_path
+from configuration.config import data_dir, bert_vocab_path, bert_data_path, bert_model_path
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -26,114 +29,138 @@ id2predicate = {int(i): j for i, j in id2predicate.items()}
 
 id2char, char2id = json.load(open(data_dir + '/all_chars_me.json'))
 
-hidden_size = 256
+hidden_size = 768
 num_classes = len(id2predicate)
 batch_size = 64
 epoch_num = 6
 MAX_SEQ_LENGTH = 160
 
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+
 if torch.cuda.is_available():
     torch.backends.cudnn.benchmark = True
 
 
-class BertSequenceLabeling(BertPreTrainedModel):
-    def __init__(self, config):
-        super(BertSequenceLabeling, self).__init__(config)
-        self.bert = BertModel(config)
-        self.dropout = nn.Dropout(config.dropout_prob)
-        self.apply(self.init_bert_weights)
-
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, ):
-        _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
-        pooled_output = self.dropout(pooled_output)
-
-        return pooled_output
-
-
 class InputFeature:
-    def __init__(self, input_id, segment_ids, input_mask):
+    def __init__(self, input_id, input_mask, segment_ids, padding):
         self.input_id = input_id
-        self.segment_ids = segment_ids
         self.input_mask = input_mask
+        self.segment_ids = segment_ids
+        self.padding = padding
 
 
-def convert_example_to_feature(texts, max_seq_length=MAX_SEQ_LENGTH):
-    tokenizer = BertTokenizer.from_pretrained(pretrained_model_name_or_path=bert_vocab_path, do_lower=True)
-
-    features = []
-
-    for idx, text in enumerate(texts):
-        text = [c for c in text]
-        tokens_a = tokenizer.tokenize(text)
-        if len(tokens_a) > max_seq_length - 2:
-            tokens_a = tokens_a[:max_seq_length - 2]
-        tokens_a = ['[CLS]'] + tokens_a + ['[SEP]']
-
-        segment_ids = [0] * len(tokens_a)
-        input_mask = [1] * len(tokens_a)
-
-        input_id = tokenizer.convert_tokens_to_ids(tokens_a)
-
-        # zero-padding
-        padding = [0] * (max_seq_length - len(input_id))
-        input_id += padding
-        segment_ids += padding
-        input_mask += padding
-
-        assert len(input_id) == max_seq_length
-        assert len(segment_ids) == max_seq_length
-        assert len(input_mask) == max_seq_length
-
-        if idx < 5:
-            logger.info("*** Examples ***")
-            logger.info("Input id: %s" % " ".join([str(x) for x in input_id]))
-            logger.info("Segment id: %s" % " ".join([str(x) for x in segment_ids]))
-            logger.info("Input mask: %s" % " ".join([str(x) for x in input_mask]))
-
-        features.append(InputFeature(input_id=input_id, segment_ids=segment_ids, input_mask=input_mask))
-
-    return features
-
-train_features = convert_example_to_feature()
+def load_vocab(vocab_file):
+    """Loads a vocabulary file into a dictionary."""
+    vocab = collections.OrderedDict()
+    index = 0
+    with open(vocab_file, "r", encoding="utf-8") as reader:
+        while True:
+            token = reader.readline()
+            if not token:
+                break
+            token = token.strip()
+            vocab[token] = index
+            index += 1
+    return vocab
 
 
-class SubjectModel(nn.Module):
-    def __init__(self):
-        super(SubjectModel, self).__init__()
-        self.embeddings = nn.Embedding(len(char2id) + 2, hidden_size)
-        self.lstm1 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
-        self.lstm2 = nn.LSTM(hidden_size, hidden_size // 2, bidirectional=True, batch_first=True)
+bert_vocab = load_vocab(bert_vocab_path)
 
-        self.conv = nn.Conv1d(in_channels=hidden_size * 2,
-                              out_channels=hidden_size,
-                              kernel_size=3,
-                              padding=1)
+
+def seq_padding(X):
+    ML = max(map(len, X))
+    return [x + [0] * (ML - len(x)) for x in X]
+
+
+class data_generator:
+    def __init__(self, data, batch_size=64):
+        self.data = data
+        self.batch_size = batch_size
+        self.steps = len(self.data) // self.batch_size
+        if len(self.data) % self.batch_size != 0:
+            self.steps += 1
+
+    def __len__(self):
+        return self.steps
+
+    def __iter__(self):
+        # while True:
+        idxs = list(range(len(self.data)))
+        np.random.shuffle(idxs)
+        T, S1, S2, K1, K2, O1, O2, TM, TS = [], [], [], [], [], [], [], [], []
+        for i in idxs:
+            d = self.data[i]
+            text = d['text']
+            text = re.sub(r'\s+', '', text)
+            items = {}
+            for sp in d['spo_list']:
+                subjectid = text.find(sp[0])
+                objectid = text.find(sp[2])
+                if subjectid != -1 and objectid != -1:
+                    key = (subjectid, subjectid + len(sp[0]))
+                    if key not in items:
+                        items[key] = []
+                    items[key].append((objectid,
+                                       objectid + len(sp[2]),
+                                       predicate2id[sp[1]]))
+            if items:
+                text_ids = [bert_vocab.get('[CLS]')] + [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text] + [bert_vocab.get('[SEP]')]
+                text_mask = [1] * len(text_ids)
+                T.append(text_ids)
+                TM.append(text_mask)
+
+                s1, s2 = [0] * len(text), [0] * len(text)
+                for j in items:
+                    s1[j[0]] = 1
+                    s2[j[1] - 1] = 1
+                k1, k2 = choice(list(items.keys()))
+                o1, o2 = [0] * len(text), [0] * len(text)  # 0是unk类（共49+1个类）
+                for j in items[(k1, k2)]:
+                    o1[j[0]] = j[2]
+                    o2[j[1] - 1] = j[2]
+
+                S1.append([0] + s1 + [0])
+                S2.append([0] + s2 + [0])
+                K1.append(k1 + 1)
+                K2.append(k2)
+                O1.append([0] + o1 + [0])
+                O2.append([0] + o2 + [0])
+                if len(T) == self.batch_size or i == idxs[-1]:
+                    T = torch.tensor(seq_padding(T), dtype=torch.long)
+                    TM = torch.tensor(seq_padding(TM), dtype=torch.long)
+                    TS = torch.zeros(*T.size(), dtype=torch.long)
+
+                    S1 = torch.tensor(seq_padding(S1), dtype=torch.float32)
+                    S2 = torch.tensor(seq_padding(S2), dtype=torch.float32)
+                    O1 = torch.tensor(seq_padding(O1))
+                    O2 = torch.tensor(seq_padding(O2))
+                    K1, K2 = torch.tensor(K1), torch.tensor(K2)
+                    yield [T, S1, S2, K1, K2, O1, O2, TM, TS], None
+                    T, S1, S2, K1, K2, O1, O2, TM, TS = [], [], [], [], [], [], [], [], []
+
+
+train_D = data_generator(train_data)
+
+
+class SubjectModel(BertPreTrainedModel):
+    def __init__(self, config):
+        super(SubjectModel, self).__init__(config)
+        self.bert = BertModel(config)
 
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=1)
 
-    def forward(self, x_idx, x_length):
-        x_masks = torch.eq(x_idx, 0)
-        x_masks.requires_grad = False
+        self.apply(self.init_bert_weights)
 
-        x_embed = self.embeddings(x_idx)
-        x_embed = F.dropout(x_embed, p=0.25, training=self.training)
+    def forward(self, input_id, token_type_id, input_mask):
+        encoder_layers, _ = self.bert(input_id, token_type_id, input_mask, output_all_encoded_layers=False)
 
-        packed = torch.nn.utils.rnn.pack_padded_sequence(x_embed, x_length, batch_first=True)
-        t, _ = self.lstm1(packed)
-        t, _ = self.lstm2(t)  # [b,s,h]
-        t, _ = torch.nn.utils.rnn.pad_packed_sequence(t, batch_first=True)
+        ps1 = torch.sigmoid(self.linear1(encoder_layers).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
+        ps2 = torch.sigmoid(self.linear2(encoder_layers).squeeze(-1))
 
-        t_max = F.max_pool1d(t.masked_fill(x_masks.unsqueeze(2), -1e10).permute(0, 2, 1), kernel_size=t.size(1))
-        t_max = t_max.squeeze(-1).unsqueeze(1)  # [b,1,h]
-
-        t_concat = torch.cat([t, t_max.expand_as(t)], dim=-1)  # [b,s,h*2]
-        t_conv = F.relu(self.conv(t_concat.permute(0, 2, 1))).permute(0, 2, 1)  # [b,s,h]
-
-        ps1 = torch.sigmoid(self.linear1(t_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
-        ps2 = torch.sigmoid(self.linear2(t_conv).squeeze(-1))
-
-        return ps1, ps2, t, t_concat, x_masks
+        return ps1, ps2, encoder_layers
 
 
 def gather(indexs, mat):
@@ -147,24 +174,24 @@ def gather(indexs, mat):
 class ObjectModel(nn.Module):
     def __init__(self):
         super(ObjectModel, self).__init__()
-        self.conv = nn.Conv1d(in_channels=hidden_size * 4,
-                              out_channels=hidden_size,
-                              kernel_size=3,
-                              padding=1)
-        self.linear1 = nn.Linear(in_features=hidden_size, out_features=num_classes + 1)
-        self.linear2 = nn.Linear(in_features=hidden_size, out_features=num_classes + 1)
+        # self.conv = nn.Conv1d(in_channels=hidden_size * 4,
+        #                       out_channels=hidden_size,
+        #                       kernel_size=3,
+        #                       padding=1)
+        self.linear1 = nn.Linear(in_features=hidden_size * 3, out_features=num_classes + 1)
+        self.linear2 = nn.Linear(in_features=hidden_size * 3, out_features=num_classes + 1)
 
-    def forward(self, t, t_concat, k1, k2):
-        k1 = gather(k1, t)
-        k2 = gather(k2, t)  # [b,h]
+    def forward(self, x_b, k1, k2):
+        k1 = gather(k1, x_b)
+        k2 = gather(k2, x_b)  # [b,h]
 
         k = torch.cat([k1, k2], dim=1)  # [b,h*2]
-        h = torch.cat([t_concat, k.unsqueeze(1).to(torch.float32).expand_as(t_concat)], dim=2)  # [b,s,h*4]
+        h = torch.cat([x_b, k.unsqueeze(1).to(torch.float32).expand(x_b.size(0), x_b.size(1), k.size(1))], dim=2)  # [b,s,h*4]
 
-        h_conv = F.relu(self.conv(h.permute(0, 2, 1))).permute(0, 2, 1)  # [b,s,h]
+        # h_conv = F.relu(self.conv(h.permute(0, 2, 1))).permute(0, 2, 1)  # [b,s,h]
 
-        po1 = self.linear1(h_conv)  # [b,s,num_class]
-        po2 = self.linear2(h_conv)
+        po1 = self.linear1(h)  # [b,s,num_class]
+        po2 = self.linear2(h)
 
         return po1, po2
 
@@ -172,7 +199,7 @@ class ObjectModel(nn.Module):
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 n_gpu = torch.cuda.device_count()
 
-subject_model = SubjectModel()
+subject_model = SubjectModel.from_pretrained(pretrained_model_name_or_path=bert_model_path, cache_dir=bert_data_path)
 object_model = ObjectModel()
 
 subject_model.to(device)
@@ -182,12 +209,14 @@ if n_gpu > 1:
     subject_model = torch.nn.DataParallel(subject_model)
     object_model = torch.nn.DataParallel(object_model)
 
+    torch.cuda.manual_seed_all(42)
+
 # loss
 b_loss_func = nn.BCELoss(reduction='none')
 loss_func = nn.CrossEntropyLoss(reduction='none')
 
 # optim
-param_optimizer = list(subject_model.named_parameters() + object_model.named_parameters())
+param_optimizer = list(subject_model.named_parameters()) + list(object_model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
 optimizer_grouped_parameters = [
     {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
@@ -203,13 +232,22 @@ optimizer = BertAdam(optimizer_grouped_parameters,
                      warmup=warmup_proportion,
                      t_total=num_train_optimization_steps)
 
+
 def extract_items(text_in):
     R = []
-    _s = [char2id.get(c, 1) for c in text_in]
-    _l = torch.tensor([len(_s)])
+    _s = [bert_vocab.get('[CLS]')] + [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text_in] + [bert_vocab.get('[SEP]')]
+    _input_mask = [1] * len(_s)
     _s = torch.tensor([_s])
+    _input_mask = torch.tensor([_input_mask])
+    _segment_ids = torch.zeros(*_s.size())
+
+    _t_mask = 1 - _input_mask
+    _t_mask = _t_mask.type(torch.ByteTensor)
+
     with torch.no_grad():
-        _k1, _k2, _t, _t_concat, _t_mask = subject_model(_s.to(device), _l.to(device))
+        _k1, _k2, _t_b = subject_model(_s.to(device),
+                                       _segment_ids.to(device),
+                                       _input_mask.to(device))
         _k1.masked_fill_(_t_mask, 0)
         _k2.masked_fill_(_t_mask, 0)
 
@@ -224,7 +262,7 @@ def extract_items(text_in):
             if _subject:
                 _kk1, _kk2 = torch.tensor([i]), torch.tensor([i + j])
                 with torch.no_grad():
-                    _o1, _o2 = object_model(_t, _t_concat, _kk1, _kk2)  # [b,s,50]
+                    _o1, _o2 = object_model(_t_b, _kk1, _kk2)  # [b,s,50]
                     _o1.masked_fill_(_t_mask.unsqueeze(2), 0)
                     _o2.masked_fill_(_t_mask.unsqueeze(2), 0)
                 _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
@@ -257,12 +295,16 @@ for e in range(epoch_num):
         batch_idx += 1
 
         batch = tuple(t.to(device) for t in batch[0])
-        T, S1, S2, K1, K2, O1, O2, Ls = batch
-        pred_s1, pred_s2, x_lstm2_, x_concat_, x_mask_ = subject_model(T, Ls)
-        pred_o1, pred_o2 = object_model(x_lstm2_, x_concat_, K1, K2)
+        T, S1, S2, K1, K2, O1, O2, TM, TS = batch
+        pred_s1, pred_s2, x_bert = subject_model(T, TS, TM)
+        pred_o1, pred_o2 = object_model(x_bert, K1, K2)
 
         s1_loss = b_loss_func(pred_s1, S1)  # [b,s]
         s2_loss = b_loss_func(pred_s2, S2)
+
+        x_mask_ = 1 - TM
+        x_mask_.requires_grad = False
+        x_mask_ = x_mask_.type(torch.ByteTensor)
 
         s1_loss.masked_fill_(x_mask_, 0)
         s2_loss.masked_fill_(x_mask_, 0)
@@ -273,7 +315,7 @@ for e in range(epoch_num):
         o1_loss.masked_fill_(x_mask_, 0)
         o2_loss.masked_fill_(x_mask_, 0)
 
-        total_ele = torch.sum(1 - x_mask_)
+        total_ele = torch.sum(TM)
         s1_loss = torch.sum(s1_loss) / total_ele
         s2_loss = torch.sum(s2_loss) / total_ele
         o1_loss = torch.sum(o1_loss) / total_ele
@@ -281,14 +323,14 @@ for e in range(epoch_num):
 
         tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
-        # if n_gpu > 1:
-        #     tmp_loss = tmp_loss.mean()
+        if n_gpu > 1:
+            tmp_loss = tmp_loss.mean()
 
         tr_total_loss += tmp_loss.item()
 
-        optim.zero_grad()
+        optimizer.zero_grad()
         tmp_loss.backward()
-        optim.step()
+        optimizer.step()
 
         if batch_idx % 100 == 0:
             logger.info(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss / batch_idx:.8f}')
