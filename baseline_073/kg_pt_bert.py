@@ -245,11 +245,12 @@ def extract_items(text_in):
     _t_mask = 1 - _input_mask
     _t_mask = _t_mask.type(torch.ByteTensor)
     _t_mask = _t_mask.to(device)
+    _s = _s.to(device)
+    _segment_ids = _segment_ids.to(device)
+    _input_mask = _input_mask.to(device)
 
     with torch.no_grad():
-        _k1, _k2, _t_b = subject_model(_s.to(device),
-                                       _segment_ids.to(device),
-                                       _input_mask.to(device))
+        _k1, _k2, _t_b = subject_model(_s, _segment_ids, _input_mask)
         _k1.masked_fill_(_t_mask, 0)
         _k2.masked_fill_(_t_mask, 0)
 
