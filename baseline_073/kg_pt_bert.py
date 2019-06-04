@@ -307,7 +307,7 @@ for e in range(epoch_num):
         x_mask_ = 1 - TM
         x_mask_.requires_grad = False
         x_mask_ = x_mask_.type(torch.ByteTensor)
-        x_mask_.to(device)
+        x_mask_ = x_mask_.to(device)
 
         s1_loss.masked_fill_(x_mask_, 0)
         s2_loss.masked_fill_(x_mask_, 0)
