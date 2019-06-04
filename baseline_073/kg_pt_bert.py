@@ -244,7 +244,7 @@ def extract_items(text_in):
 
     _t_mask = 1 - _input_mask
     _t_mask = _t_mask.type(torch.ByteTensor)
-    _t_mask.to(device)
+    _t_mask = _t_mask.to(device)
 
     with torch.no_grad():
         _k1, _k2, _t_b = subject_model(_s.to(device),
