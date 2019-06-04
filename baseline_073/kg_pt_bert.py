@@ -238,16 +238,13 @@ def extract_items(text_in):
     R = []
     _s = [bert_vocab.get('[CLS]')] + [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text_in] + [bert_vocab.get('[SEP]')]
     _input_mask = [1] * len(_s)
-    _s = torch.tensor([_s])
-    _input_mask = torch.tensor([_input_mask])
-    _segment_ids = torch.zeros(*_s.size())
+    _s = torch.tensor([_s], dtype=torch.long, device=device)
+    _input_mask = torch.tensor([_input_mask], dtype=torch.long, device=device)
+    _segment_ids = torch.zeros(*_s.size(), dtype=torch.long, device=device)
 
     _t_mask = 1 - _input_mask
     _t_mask = _t_mask.type(torch.ByteTensor)
     _t_mask = _t_mask.to(device)
-    _s = _s.to(device)
-    _segment_ids = _segment_ids.to(device)
-    _input_mask = _input_mask.to(device)
 
     with torch.no_grad():
         _k1, _k2, _t_b = subject_model(_s, _segment_ids, _input_mask)
