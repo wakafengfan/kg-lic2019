@@ -10,7 +10,7 @@ from random import choice
 import numpy as np
 import torch
 import torch.nn as nn
-from pytorch_pretrained_bert import BertTokenizer, BertAdam
+from pytorch_pretrained_bert import BertAdam
 from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
 from tqdm import tqdm
 
@@ -31,10 +31,10 @@ id2char, char2id = json.load(open(data_dir + '/all_chars_me.json'))
 
 hidden_size = 768
 num_classes = len(id2predicate)
-batch_size = 32
-epoch_num = 6
+batch_size = 64
+epoch_num = 20
 
-fp16 = True
+fp16 = False
 loss_scale = 0
 local_rank = -1
 
@@ -78,7 +78,7 @@ def seq_padding(X):
 
 
 class data_generator:
-    def __init__(self, data, batch_size=64):
+    def __init__(self, data):
         self.data = data
         self.batch_size = batch_size
         self.steps = len(self.data) // self.batch_size
