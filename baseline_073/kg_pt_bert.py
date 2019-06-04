@@ -31,9 +31,12 @@ id2char, char2id = json.load(open(data_dir + '/all_chars_me.json'))
 
 hidden_size = 768
 num_classes = len(id2predicate)
-batch_size = 64
+batch_size = 32
 epoch_num = 6
-MAX_SEQ_LENGTH = 160
+
+fp16 = True
+loss_scale = 0
+local_rank = -1
 
 random.seed(42)
 np.random.seed(42)
@@ -106,7 +109,7 @@ class data_generator:
                                        objectid + len(sp[2]),
                                        predicate2id[sp[1]]))
             if items:
-                text_ids = [bert_vocab.get('[CLS]')] + [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text] + [bert_vocab.get('[SEP]')]
+                text_ids = [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text]
                 text_mask = [1] * len(text_ids)
                 T.append(text_ids)
                 TM.append(text_mask)
@@ -121,12 +124,12 @@ class data_generator:
                     o1[j[0]] = j[2]
                     o2[j[1] - 1] = j[2]
 
-                S1.append([0] + s1 + [0])
-                S2.append([0] + s2 + [0])
-                K1.append(k1 + 1)
-                K2.append(k2)
-                O1.append([0] + o1 + [0])
-                O2.append([0] + o2 + [0])
+                S1.append(s1)
+                S2.append(s2)
+                K1.append(k1)
+                K2.append(k2-1)
+                O1.append(o1)
+                O2.append(o2)
                 if len(T) == self.batch_size or i == idxs[-1]:
                     T = torch.tensor(seq_padding(T), dtype=torch.long)
                     TM = torch.tensor(seq_padding(TM), dtype=torch.long)
@@ -203,14 +206,18 @@ logger.info(f'use {n_gpu} gpu')
 subject_model = SubjectModel.from_pretrained(pretrained_model_name_or_path=bert_model_path, cache_dir=bert_data_path)
 object_model = ObjectModel()
 
+if fp16:
+    subject_model.half()
+    object_model.half()
 subject_model.to(device)
 object_model.to(device)
 if n_gpu > 1:
+    torch.cuda.manual_seed_all(42)
+
     logger.info(f'let us use {n_gpu} gpu')
     subject_model = torch.nn.DataParallel(subject_model)
     object_model = torch.nn.DataParallel(object_model)
 
-    torch.cuda.manual_seed_all(42)
 
 # loss
 b_loss_func = nn.BCELoss(reduction='none')
@@ -226,53 +233,64 @@ optimizer_grouped_parameters = [
 
 learning_rate = 5e-5
 warmup_proportion = 0.1
-num_train_optimization_steps = len(train_data) / batch_size * epoch_num
+num_train_optimization_steps = len(train_data) // batch_size * epoch_num
+logger.info(f'num_train_optimization: {num_train_optimization_steps}')
 
-optimizer = BertAdam(optimizer_grouped_parameters,
-                     lr=learning_rate,
-                     warmup=warmup_proportion,
-                     t_total=num_train_optimization_steps)
+if fp16:
+    try:
+        from apex.optimizers import FP16_Optimizer
+        from apex.optimizers import FusedAdam
+    except ImportError:
+        raise ImportError(
+            "Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
+
+    optimizer = FusedAdam(optimizer_grouped_parameters,
+                          lr=learning_rate,
+                          bias_correction=False,
+                          max_grad_norm=1.0)
+    if loss_scale == 0:
+        optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
+    else:
+        optimizer = FP16_Optimizer(optimizer, static_loss_scale=loss_scale)
+
+else:
+    optimizer = BertAdam(optimizer_grouped_parameters,
+                         lr=learning_rate,
+                         warmup=warmup_proportion,
+                         t_total=num_train_optimization_steps)
 
 
 def extract_items(text_in):
     R = []
-    _s = [bert_vocab.get('[CLS]')] + [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text_in] + [bert_vocab.get('[SEP]')]
+    _s = [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text_in]
     _input_mask = [1] * len(_s)
     _s = torch.tensor([_s], dtype=torch.long, device=device)
     _input_mask = torch.tensor([_input_mask], dtype=torch.long, device=device)
     _segment_ids = torch.zeros(*_s.size(), dtype=torch.long, device=device)
 
-    _t_mask = 1 - _input_mask
-    _t_mask = _t_mask.type(torch.ByteTensor)
-    _t_mask = _t_mask.to(device)
-
     with torch.no_grad():
         _k1, _k2, _t_b = subject_model(_s, _segment_ids, _input_mask)  # _k1:[b,s]
-        _k1.masked_fill_(_t_mask, 0)
-        _k2.masked_fill_(_t_mask, 0)
 
     _k1, _k2 = _k1[0, :], _k2[0, :]
     for i, _kk1 in enumerate(_k1):
-        if _kk1 > 0.5 and 0 < i < _k1.size(-1)-1:
+        if _kk1 > 0.5:
             _subject = ''
             for j, _kk2 in enumerate(_k2[i:]):
-                if _kk2 > 0.5 and 0 < j < _k2.size(-1)-1:
+                if _kk2 > 0.5:
                     _subject = text_in[i: i + j + 1]
                     break
             if _subject:
                 _kk1, _kk2 = torch.tensor([i]), torch.tensor([i + j])
                 with torch.no_grad():
                     _o1, _o2 = object_model(_t_b, _kk1, _kk2)  # [b,s,50]
-                    _o1.masked_fill_(_t_mask.unsqueeze(2), 0)
-                    _o2.masked_fill_(_t_mask.unsqueeze(2), 0)
                 _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
                 _o1 = _o1.detach().cpu().numpy()
                 _o2 = _o2.detach().cpu().numpy()
                 for m, _oo1 in enumerate(_o1):
-                    if _oo1 > 0 and 0 < m < len(_o1)-1:
-                        for j, _oo2 in enumerate(_o2[i:]):
+                    if _oo1 > 0:
+                        for n, _oo2 in enumerate(_o2[m:]):
                             if _oo2 == _oo1:
-                                _object = text_in[i: i + j + 1]
+                                _object = text_in[m: m + n + 1]
                                 _predicate = id2predicate[_oo1]
                                 R.append((_subject, _predicate, _object))
                                 break
@@ -327,12 +345,15 @@ for e in range(epoch_num):
         if n_gpu > 1:
             tmp_loss = tmp_loss.mean()
 
-        tr_total_loss += tmp_loss.item()
+        if fp16:
+            optimizer.backward(tmp_loss)
+        else:
+            tmp_loss.backward()
 
         optimizer.zero_grad()
-        tmp_loss.backward()
         optimizer.step()
 
+        tr_total_loss += tmp_loss.item()
         if batch_idx % 100 == 0:
             logger.info(f'Epoch:{e} - batch:{batch_idx}/{train_D.steps} - loss: {tr_total_loss / batch_idx:.8f}')
 
