@@ -247,16 +247,16 @@ def extract_items(text_in):
     _t_mask = _t_mask.to(device)
 
     with torch.no_grad():
-        _k1, _k2, _t_b = subject_model(_s, _segment_ids, _input_mask)
+        _k1, _k2, _t_b = subject_model(_s, _segment_ids, _input_mask)  # _k1:[b,s]
         _k1.masked_fill_(_t_mask, 0)
         _k2.masked_fill_(_t_mask, 0)
 
     _k1, _k2 = _k1[0, :], _k2[0, :]
     for i, _kk1 in enumerate(_k1):
-        if _kk1 > 0.5:
+        if _kk1 > 0.5 and 0 < i < _k1.size(-1)-1:
             _subject = ''
             for j, _kk2 in enumerate(_k2[i:]):
-                if _kk2 > 0.5:
+                if _kk2 > 0.5 and 0 < j < _k2.size(-1)-1:
                     _subject = text_in[i: i + j + 1]
                     break
             if _subject:
@@ -268,8 +268,8 @@ def extract_items(text_in):
                 _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
                 _o1 = _o1.detach().cpu().numpy()
                 _o2 = _o2.detach().cpu().numpy()
-                for i, _oo1 in enumerate(_o1):
-                    if _oo1 > 0:
+                for m, _oo1 in enumerate(_o1):
+                    if _oo1 > 0 and 0 < m < len(_o1)-1:
                         for j, _oo2 in enumerate(_o2[i:]):
                             if _oo2 == _oo1:
                                 _object = text_in[i: i + j + 1]
