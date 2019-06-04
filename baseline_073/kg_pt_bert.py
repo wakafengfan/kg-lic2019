@@ -350,8 +350,8 @@ for e in range(epoch_num):
         else:
             tmp_loss.backward()
 
-        optimizer.zero_grad()
         optimizer.step()
+        optimizer.zero_grad()
 
         tr_total_loss += tmp_loss.item()
         if batch_idx % 100 == 0:
