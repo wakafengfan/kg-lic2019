@@ -161,7 +161,7 @@ class SubjectModel(BertPreTrainedModel):
 
     def forward(self, input_id, token_type_id, input_mask):
         encoder_layers, _ = self.bert(input_id, token_type_id, input_mask, output_all_encoded_layers=False)
-        x_conv = self.conv(encoder_layers.permute(0,2,1)).permute(0,2,1)
+        x_conv = F.relu(self.conv(encoder_layers.permute(0,2,1))).permute(0,2,1)
 
         ps1 = torch.sigmoid(self.linear1(x_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
         ps2 = torch.sigmoid(self.linear2(x_conv).squeeze(-1))
