@@ -13,6 +13,7 @@ import torch.nn as nn
 from pytorch_pretrained_bert import BertAdam
 from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
 from tqdm import tqdm
+import torch.nn.functional as F
 
 from configuration.config import data_dir, bert_vocab_path, bert_data_path, bert_model_path
 
@@ -32,7 +33,7 @@ id2char, char2id = json.load(open(data_dir + '/all_chars_me.json'))
 hidden_size = 768
 num_classes = len(id2predicate)
 batch_size = 64
-epoch_num = 20
+epoch_num = 10
 
 fp16 = False
 loss_scale = 0
@@ -151,6 +152,7 @@ class SubjectModel(BertPreTrainedModel):
     def __init__(self, config):
         super(SubjectModel, self).__init__(config)
         self.bert = BertModel(config)
+        self.conv = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=3, padding=1)
 
         self.linear1 = nn.Linear(in_features=hidden_size, out_features=1)
         self.linear2 = nn.Linear(in_features=hidden_size, out_features=1)
@@ -159,9 +161,10 @@ class SubjectModel(BertPreTrainedModel):
 
     def forward(self, input_id, token_type_id, input_mask):
         encoder_layers, _ = self.bert(input_id, token_type_id, input_mask, output_all_encoded_layers=False)
+        x_conv = self.conv(encoder_layers.permute(0,2,1)).permute(0,2,1)
 
-        ps1 = torch.sigmoid(self.linear1(encoder_layers).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
-        ps2 = torch.sigmoid(self.linear2(encoder_layers).squeeze(-1))
+        ps1 = torch.sigmoid(self.linear1(x_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
+        ps2 = torch.sigmoid(self.linear2(x_conv).squeeze(-1))
 
         return ps1, ps2, encoder_layers
 
@@ -177,24 +180,24 @@ def gather(indexs, mat):
 class ObjectModel(nn.Module):
     def __init__(self):
         super(ObjectModel, self).__init__()
-        # self.conv = nn.Conv1d(in_channels=hidden_size * 4,
-        #                       out_channels=hidden_size,
-        #                       kernel_size=3,
-        #                       padding=1)
-        self.linear1 = nn.Linear(in_features=hidden_size * 3, out_features=num_classes + 1)
-        self.linear2 = nn.Linear(in_features=hidden_size * 3, out_features=num_classes + 1)
+        self.conv = nn.Conv1d(in_channels=hidden_size * 3,
+                              out_channels=hidden_size,
+                              kernel_size=3,
+                              padding=1)
+        self.linear1 = nn.Linear(in_features=hidden_size, out_features=num_classes + 1)
+        self.linear2 = nn.Linear(in_features=hidden_size, out_features=num_classes + 1)
 
     def forward(self, x_b, k1, k2):
         k1 = gather(k1, x_b)
         k2 = gather(k2, x_b)  # [b,h]
 
         k = torch.cat([k1, k2], dim=1)  # [b,h*2]
-        h = torch.cat([x_b, k.unsqueeze(1).to(torch.float32).expand(x_b.size(0), x_b.size(1), k.size(1))], dim=2)  # [b,s,h*4]
+        h = torch.cat([x_b, k.unsqueeze(1).to(torch.float32).expand(x_b.size(0), x_b.size(1), k.size(1))], dim=2)  # [b,s,h*3]
 
-        # h_conv = F.relu(self.conv(h.permute(0, 2, 1))).permute(0, 2, 1)  # [b,s,h]
+        h_conv = F.relu(self.conv(h.permute(0, 2, 1))).permute(0, 2, 1)  # [b,s,h]
 
-        po1 = self.linear1(h)  # [b,s,num_class]
-        po2 = self.linear2(h)
+        po1 = self.linear1(h_conv)  # [b,s,num_class]
+        po2 = self.linear2(h_conv)
 
         return po1, po2
 
