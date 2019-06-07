@@ -35,10 +35,6 @@ num_classes = len(id2predicate)
 batch_size = 64
 epoch_num = 10
 
-fp16 = False
-loss_scale = 0
-local_rank = -1
-
 random.seed(42)
 np.random.seed(42)
 torch.manual_seed(42)
@@ -209,9 +205,6 @@ logger.info(f'use {n_gpu} gpu')
 subject_model = SubjectModel.from_pretrained(pretrained_model_name_or_path=bert_model_path, cache_dir=bert_data_path)
 object_model = ObjectModel()
 
-if fp16:
-    subject_model.half()
-    object_model.half()
 subject_model.to(device)
 object_model.to(device)
 if n_gpu > 1:
@@ -239,28 +232,10 @@ warmup_proportion = 0.1
 num_train_optimization_steps = len(train_data) // batch_size * epoch_num
 logger.info(f'num_train_optimization: {num_train_optimization_steps}')
 
-if fp16:
-    try:
-        from apex.optimizers import FP16_Optimizer
-        from apex.optimizers import FusedAdam
-    except ImportError:
-        raise ImportError(
-            "Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
-
-    optimizer = FusedAdam(optimizer_grouped_parameters,
-                          lr=learning_rate,
-                          bias_correction=False,
-                          max_grad_norm=1.0)
-    if loss_scale == 0:
-        optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
-    else:
-        optimizer = FP16_Optimizer(optimizer, static_loss_scale=loss_scale)
-
-else:
-    optimizer = BertAdam(optimizer_grouped_parameters,
-                         lr=learning_rate,
-                         warmup=warmup_proportion,
-                         t_total=num_train_optimization_steps)
+optimizer = BertAdam(optimizer_grouped_parameters,
+                     lr=learning_rate,
+                     warmup=warmup_proportion,
+                     t_total=num_train_optimization_steps)
 
 
 def extract_items(text_in):
@@ -348,10 +323,7 @@ for e in range(epoch_num):
         if n_gpu > 1:
             tmp_loss = tmp_loss.mean()
 
-        if fp16:
-            optimizer.backward(tmp_loss)
-        else:
-            tmp_loss.backward()
+        tmp_loss.backward()
 
         optimizer.step()
         optimizer.zero_grad()
