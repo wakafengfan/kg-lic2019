@@ -148,19 +148,22 @@ class SubjectModel(BertPreTrainedModel):
     def __init__(self, config):
         super(SubjectModel, self).__init__(config)
         self.bert = BertModel(config)
-        self.conv = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=3, padding=1)
 
-        self.linear1 = nn.Linear(in_features=hidden_size, out_features=1)
-        self.linear2 = nn.Linear(in_features=hidden_size, out_features=1)
+        self.linear11 = nn.Linear(in_features=hidden_size, out_features=hidden_size//2)
+        self.linear12 = nn.Linear(in_features=hidden_size//2, out_features=1)
+        self.linear21 = nn.Linear(in_features=hidden_size, out_features=hidden_size//2)
+        self.linear22 = nn.Linear(in_features=hidden_size//2, out_features=1)
 
         self.apply(self.init_bert_weights)
 
     def forward(self, input_id, token_type_id, input_mask):
         encoder_layers, _ = self.bert(input_id, token_type_id, input_mask, output_all_encoded_layers=False)
-        x_conv = F.relu(self.conv(encoder_layers.permute(0,2,1))).permute(0,2,1)
 
-        ps1 = torch.sigmoid(self.linear1(x_conv).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
-        ps2 = torch.sigmoid(self.linear2(x_conv).squeeze(-1))
+        x_l1 = self.linear11(encoder_layers)  # [b,s,h]->[b,s,h/2]
+        x_l2 = self.linear21(encoder_layers)
+
+        ps1 = torch.sigmoid(self.linear12(x_l1).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
+        ps2 = torch.sigmoid(self.linear22(x_l2).squeeze(-1))
 
         return ps1, ps2, encoder_layers
 
@@ -176,12 +179,10 @@ def gather(indexs, mat):
 class ObjectModel(nn.Module):
     def __init__(self):
         super(ObjectModel, self).__init__()
-        self.conv = nn.Conv1d(in_channels=hidden_size * 3,
-                              out_channels=hidden_size,
-                              kernel_size=3,
-                              padding=1)
-        self.linear1 = nn.Linear(in_features=hidden_size, out_features=num_classes + 1)
-        self.linear2 = nn.Linear(in_features=hidden_size, out_features=num_classes + 1)
+        self.linear11 = nn.Linear(in_features=hidden_size*3, out_features=hidden_size*3//2)
+        self.linear12 = nn.Linear(in_features=hidden_size*3//2, out_features=num_classes + 1)
+        self.linear21 = nn.Linear(in_features=hidden_size*3, out_features=hidden_size*3//2)
+        self.linear22 = nn.Linear(in_features=hidden_size*3//2, out_features=num_classes + 1)
 
     def forward(self, x_b, k1, k2):
         k1 = gather(k1, x_b)
@@ -190,10 +191,11 @@ class ObjectModel(nn.Module):
         k = torch.cat([k1, k2], dim=1)  # [b,h*2]
         h = torch.cat([x_b, k.unsqueeze(1).to(torch.float32).expand(x_b.size(0), x_b.size(1), k.size(1))], dim=2)  # [b,s,h*3]
 
-        h_conv = F.relu(self.conv(h.permute(0, 2, 1))).permute(0, 2, 1)  # [b,s,h]
+        x_l1 = self.linear11(h)
+        x_l2 = self.linear21(h)
 
-        po1 = self.linear1(h_conv)  # [b,s,num_class]
-        po2 = self.linear2(h_conv)
+        po1 = self.linear12(x_l1)  # [b,s,num_class]
+        po2 = self.linear22(x_l2)
 
         return po1, po2
 
@@ -299,7 +301,6 @@ for e in range(epoch_num):
         s2_loss = b_loss_func(pred_s2, S2)
 
         x_mask_ = 1 - TM
-        x_mask_.requires_grad = False
         x_mask_ = x_mask_.type(torch.ByteTensor)
         x_mask_ = x_mask_.to(device)
 
@@ -318,7 +319,7 @@ for e in range(epoch_num):
         o1_loss = torch.sum(o1_loss) / total_ele
         o2_loss = torch.sum(o2_loss) / total_ele
 
-        tmp_loss = 2.5 * (s1_loss + s2_loss) + (o1_loss + o2_loss)
+        tmp_loss = (s1_loss + s2_loss) + (o1_loss + o2_loss)
 
         if n_gpu > 1:
             tmp_loss = tmp_loss.mean()
