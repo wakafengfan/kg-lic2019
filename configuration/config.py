@@ -1,5 +1,5 @@
 import os
-
+from pathlib import Path
 
 ROOT_PATH = os.path.normpath(os.path.join(os.path.abspath(os.path.dirname(__file__)), ".."))
 
@@ -7,6 +7,7 @@ ROOT_PATH = os.path.normpath(os.path.join(os.path.abspath(os.path.dirname(__file
 data_dir = os.path.join(ROOT_PATH, "data")
 model_dir = os.path.join(ROOT_PATH, "model")
 
-bert_data_path = os.path.join(data_dir, 'bert_data')
-bert_vocab_path = os.path.join(data_dir, 'bert_data', 'bert-base-chinese-vocab.txt')
-bert_model_path = os.path.join(data_dir, 'bert_data', 'bert-base-chinese.tar.gz')
+bert_data_path = Path.home()/'.pytorch_pretrained_bert'
+bert_vocab_path = bert_data_path / 'bert-base-chinese-vocab.txt'
+bert_model_path = bert_data_path / 'bert-base-chinese.tar.gz'
+
