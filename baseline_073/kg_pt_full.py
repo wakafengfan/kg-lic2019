@@ -3,7 +3,6 @@ import json
 import logging
 import pickle
 import random
-import re
 from collections import defaultdict
 from pathlib import Path
 from random import choice
@@ -15,7 +14,6 @@ import torch
 import torch.nn as nn
 from pytorch_pretrained_bert import BertAdam
 from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
-from tqdm import tqdm
 
 from configuration.config import data_dir, bert_vocab_path, bert_data_path, bert_model_path
 
@@ -36,14 +34,14 @@ np.random.seed(42)
 torch.manual_seed(42)
 
 
-train_data = json.load(open(data_dir + '/train_data_me_2.json'))
-dev_data = json.load(open(data_dir + '/dev_data_me_2.json'))
-info_ = pickle.load((Path(data_dir)/'info_.pkl').open('rb'))
-predicates = info_['predicates']
-sp2o = info_['sp2o']
-spo_total = info_['spo_total']
-s_ac = pickle.load((Path(data_dir)/'s_ac.json').open())
-o_ac = pickle.load((Path(data_dir)/'o_ac.json').open())
+train_data = json.load(open(data_dir + '/train_data_me_3.json'))
+dev_data = json.load(open(data_dir + '/dev_data_me_3.json'))
+# info_ = pickle.load((Path(data_dir)/'info_.pkl').open('rb'))
+# predicates = info_['predicates']
+# sp2o = info_['sp2o']
+# spo_total = info_['spo_total']
+# s_ac = pickle.load((Path(data_dir)/'s_ac.pkl').open())
+# o_ac = pickle.load((Path(data_dir)/'o_ac.pkl').open())
 
 id2predicate, predicate2id = json.load(open(data_dir + '/all_50_schemas_me.json'))
 id2predicate = {int(i): j for i, j in id2predicate.items()}
@@ -71,14 +69,12 @@ def load_vocab(vocab_file):
 
 bert_vocab = load_vocab(bert_vocab_path)
 
-wv_model = gensim.models.KeyedVectors.load_word2vec_format(Path(data_dir)/'tencent_embed_for_el2019')
+wv_model = gensim.models.KeyedVectors.load(str(Path(data_dir)/'tencent_embed_for_el2019'))
 word2vec = wv_model.wv.syn0
 word_size = word2vec.shape[1]
-word2vec = np.concatenate([np.zeros((1,word_size)), np.zeros((1,word_size)),word_size])
-id2word = {i+2:j for i,j in wv_model.wv.index2word}
+word2vec = np.concatenate([np.zeros((1,word_size)), np.zeros((1,word_size)),word2vec])
+id2word = {i+2:j for i,j in enumerate(wv_model.wv.index2word)}
 word2id = {j:i for i, j in id2word.items()}
-def tokenize(text_in):
-    return [i.word for i in pyhanlp.HanLP.segment(text_in)]
 def seq2vec(token_ids):
     V = []
     for s in token_ids:
@@ -88,38 +84,38 @@ def seq2vec(token_ids):
                 V[-1].append(word2id.get(w, 0))
     V = seq_padding(V)
     V = word2vec[V]
-    return
+    return V
 
 
 def seq_padding(X):
     ML = max(map(len, X))
     return [x + [0] * (ML - len(x)) for x in X]
 
-def random_generate(d, spo_list_key):
-    r = np.random.random()
-    if r > 0.5:
-        return d
-    else:
-        k = np.random.randint(len(d[spo_list_key]))
-        spi = d[spo_list_key][k]
-        k = np.random.randint(len(predicates[spi[1]]))
-        spo = predicates[spi[1]][k]
-        F = lambda s: s.replace(spi[0], spo[0]).replace(spi[2], spo[2])
-        text = F(d['text'])
-        spo_list = [(F(sp[0]), sp[1], F(sp[2])) for sp in d[spo_list_key]]
-        return {'text': text, spo_list_key: spo_list}
-
-def spo_searcher(text_in, text_idx=None):
-    R = set()
-    for s in s_ac.iter(text_in):
-        for o in o_ac.iter(text_in):
-            if (s[1], o[1]) in sp2o:
-                for p in sp2o[(s[1],o[1])]:
-                    if text_idx is None:
-                        R.add((s[1],p,o[1]))
-                    elif spo_total[(s[1],p,o[1])] - {text_idx}:
-                        R.add((s[1],p,o[1]))
-    return list(R)
+# def random_generate(d, spo_list_key):
+#     r = np.random.random()
+#     if r > 0.5:
+#         return d
+#     else:
+#         k = np.random.randint(len(d[spo_list_key]))
+#         spi = d[spo_list_key][k]
+#         k = np.random.randint(len(predicates[spi[1]]))
+#         spo = predicates[spi[1]][k]
+#         F = lambda s: s.replace(spi[0], spo[0]).replace(spi[2], spo[2])
+#         text = F(d['text'])
+#         spo_list = [(F(sp[0]), sp[1], F(sp[2])) for sp in d[spo_list_key]]
+#         return {'text': text, spo_list_key: spo_list}
+#
+# def spo_searcher(text_in, text_idx=None):
+#     R = set()
+#     for s in s_ac.iter(text_in):
+#         for o in o_ac.iter(text_in):
+#             if (s[1], o[1]) in sp2o:
+#                 for p in sp2o[(s[1],o[1])]:
+#                     if text_idx is None:
+#                         R.add((s[1],p,o[1]))
+#                     elif spo_total[(s[1],p,o[1])] - {text_idx}:
+#                         R.add((s[1],p,o[1]))
+#     return list(R)
 
 
 
@@ -138,12 +134,12 @@ class data_generator:
         # while True:
         idxs = list(range(len(self.data)))
         np.random.shuffle(idxs)
-        T, S1, S2, K1, K2, O1, O2, TM, TS, TT = [], [], [], [], [], [], [], [], [],[]
+        T, S1, S2, K1, K2, O1, O2, TM, TT = [], [], [], [], [], [], [], [], []
         for i in idxs:
             d = self.data[i]
             # text = d['text']
             # text = re.sub(r'\s+', '', text)
-            text_tokens = d['text_words']
+            text_tokens = d['text_words'].split()
             text = ''.join(text_tokens)
             items = {}
             for sp in d['spo_list']:
@@ -162,8 +158,7 @@ class data_generator:
                 T.append(text_ids)
                 TM.append(text_mask)
 
-                text_token_ids = [word2id.get(w, 1) for w in text_tokens]
-                TT.append(text_token_ids)
+                TT.append(text_tokens)
 
                 s1, s2 = [0] * len(text), [0] * len(text)
                 for j in items:
@@ -185,19 +180,46 @@ class data_generator:
                     T = torch.tensor(seq_padding(T), dtype=torch.long)
                     TM = torch.tensor(seq_padding(TM), dtype=torch.long)
                     TS = torch.zeros(*T.size(), dtype=torch.long)
-                    TT = torch.tensor(seq2vec(TT), dtype=torch.long)
+                    TT = torch.tensor(seq2vec(TT), dtype=torch.float32)
 
                     S1 = torch.tensor(seq_padding(S1), dtype=torch.float32)
                     S2 = torch.tensor(seq_padding(S2), dtype=torch.float32)
                     O1 = torch.tensor(seq_padding(O1))
                     O2 = torch.tensor(seq_padding(O2))
                     K1, K2 = torch.tensor(K1), torch.tensor(K2)
-                    yield [T, S1, S2, K1, K2, O1, O2, TM, TS, TT], None
-                    T, S1, S2, K1, K2, O1, O2, TM, TS,TT = [], [], [], [], [], [], [], [], [],[]
+                    yield T, S1, S2, K1, K2, O1, O2, TM, TS, TT
+                    T, S1, S2, K1, K2, O1, O2, TM,TT = [], [], [], [], [], [], [], [], []
+
+class dev_data_generator:
+    def __init__(self, data):
+        self.data = data
+
+    def __iter__(self):
+        dev_T, dev_TM, dev_TT, dev_SPO,dev_TEXT = [],[],[], [],[]
+        for i, d in enumerate(self.data):
+            text_words = d['text_words'].split()
+            text = ''.join(text_words)
+            text_ids = [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text]
+            text_mask = [1] * len(text_ids)
+
+            dev_T.append(text_ids)
+            dev_TM.append(text_mask)
+            dev_TT.append(text_words)
+            dev_SPO.append(set([tuple(i) for i in d['spo_list']]))
+            dev_TEXT.append(text)
+
+            if len(dev_T) == batch_size or i == len(self.data)-1:
+                dev_T = torch.tensor(seq_padding(dev_T), dtype=torch.long, device=device)
+                dev_TM = torch.tensor(seq_padding(dev_TM), dtype=torch.long, device=device)
+                dev_TS = torch.zeros(*dev_T.size(), dtype=torch.long, device=device)
+                dev_TT = torch.tensor(seq2vec(dev_TT), dtype=torch.float32, device=device)
+
+                yield dev_T, dev_TM, dev_TS, dev_TT, dev_SPO, dev_TEXT
+                dev_T, dev_TM, dev_TT, dev_SPO, dev_TEXT = [], [], [], [], []
 
 
 train_D = data_generator(train_data)
-
+dev_D = dev_data_generator(dev_data)
 
 class SubjectModel(BertPreTrainedModel):
     def __init__(self, config):
@@ -233,10 +255,8 @@ def gather(indexs, mat):
 class ObjectModel(nn.Module):
     def __init__(self):
         super(ObjectModel, self).__init__()
-        self.linear11 = nn.Linear(in_features=hidden_size*3, out_features=hidden_size*3//2)
-        self.linear12 = nn.Linear(in_features=hidden_size*3//2, out_features=num_classes + 1)
-        self.linear21 = nn.Linear(in_features=hidden_size*3, out_features=hidden_size*3//2)
-        self.linear22 = nn.Linear(in_features=hidden_size*3//2, out_features=num_classes + 1)
+        self.linear1 = nn.Linear(in_features=hidden_size*3, out_features=num_classes + 1)
+        self.linear2 = nn.Linear(in_features=hidden_size*3, out_features=num_classes + 1)
 
     def forward(self, x_b, k1, k2):
         k1 = gather(k1, x_b)
@@ -245,11 +265,8 @@ class ObjectModel(nn.Module):
         k = torch.cat([k1, k2], dim=1)  # [b,h*2]
         h = torch.cat([x_b, k.unsqueeze(1).to(torch.float32).expand(x_b.size(0), x_b.size(1), k.size(1))], dim=2)  # [b,s,h*3]
 
-        x_l1 = self.linear11(h)
-        x_l2 = self.linear21(h)
-
-        po1 = self.linear12(x_l1)  # [b,s,num_class]
-        po2 = self.linear22(x_l2)
+        po1 = self.linear1(h)  # [b,s,num_class]
+        po2 = self.linear2(h)
 
         return po1, po2
 
@@ -294,42 +311,45 @@ optimizer = BertAdam(optimizer_grouped_parameters,
                      t_total=num_train_optimization_steps)
 
 
-def extract_items(text_in, text_words):
-    R = []
-    _s = [bert_vocab.get(c, bert_vocab.get('[UNK]')) for c in text_in]
-    _sw = [word2id.get(w, 1) for w in text_words.split()]
-    _input_mask = [1] * len(_s)
-    _s = torch.tensor([_s], dtype=torch.long, device=device)
-    _input_mask = torch.tensor([_input_mask], dtype=torch.long, device=device)
-    _segment_ids = torch.zeros(*_s.size(), dtype=torch.long, device=device)
+def extract_items(_T, _TM,_TS,_TT,_TEXT):
+    Rs = []
 
     with torch.no_grad():
-        _k1, _k2, _t_b = subject_model(_s, _segment_ids, _input_mask)  # _k1:[b,s]
+        _K1, _K2, _T_B = subject_model(_T, _TS,_TM, _TT)  # _k1:[b,s]
+        _M = 1-_TM.byte()
+        _K1.masked_fill_(_M,0)
+        _K2.masked_fill_(_M,0)
+        _T_B.masked_fill_(_M.unsqueeze(2),0)
 
-    _k1, _k2 = _k1[0, :], _k2[0, :]
-    for i, _kk1 in enumerate(_k1):
-        if _kk1 > 0.5:
-            _subject = ''
-            for j, _kk2 in enumerate(_k2[i:]):
-                if _kk2 > 0.5:
-                    _subject = text_in[i: i + j + 1]
-                    break
-            if _subject:
-                _kk1, _kk2 = torch.tensor([i]), torch.tensor([i + j])
-                with torch.no_grad():
-                    _o1, _o2 = object_model(_t_b, _kk1, _kk2)  # [b,s,50]
-                _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
-                _o1 = _o1.detach().cpu().numpy()
-                _o2 = _o2.detach().cpu().numpy()
-                for m, _oo1 in enumerate(_o1):
-                    if _oo1 > 0:
-                        for n, _oo2 in enumerate(_o2[m:]):
-                            if _oo2 == _oo1:
-                                _object = text_in[m: m + n + 1]
-                                _predicate = id2predicate[_oo1]
-                                R.append((_subject, _predicate, _object))
-                                break
-    return list(set(R))
+    for idx in range(_K1.size(0)):
+        R = []
+        text_in = _TEXT[idx]
+
+        _k1, _k2,_t_b = _K1[idx], _K2[idx],_T_B[idx]
+        for i, _kk1 in enumerate(_k1):
+            if _kk1 > 0.5:
+                _subject = ''
+                for j, _kk2 in enumerate(_k2[i:]):
+                    if _kk2 > 0.5:
+                        _subject = text_in[i: i + j + 1]
+                        break
+                if _subject:
+                    _kk1, _kk2 = torch.tensor([i]), torch.tensor([i + j])
+                    with torch.no_grad():
+                        _o1, _o2 = object_model(_t_b.unsqueeze(0), _kk1, _kk2)  # [b,s,50]
+                    _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
+                    _o1 = _o1.detach().cpu().numpy()
+                    _o2 = _o2.detach().cpu().numpy()
+                    for m, _oo1 in enumerate(_o1):
+                        if _oo1 > 0:
+                            for n, _oo2 in enumerate(_o2[m:]):
+                                if _oo2 == _oo1:
+                                    _object = text_in[m: m + n + 1]
+                                    _predicate = id2predicate[_oo1]
+                                    R.append((_subject, _predicate, _object))
+                                    break
+        Rs.append(list(set(R)))
+    return Rs
 
 
 err_log = (Path(data_dir) / 'err_log.json').open('w')
@@ -347,7 +367,7 @@ for e in range(epoch_num):
     for batch in train_D:
         batch_idx += 1
 
-        batch = tuple(t.to(device) for t in batch[0])
+        batch = tuple(t.to(device) for t in batch)
         T, S1, S2, K1, K2, O1, O2, TM, TS,TT = batch
         pred_s1, pred_s2, x_bert = subject_model(T, TS, TM,TT)
         pred_o1, pred_o2 = object_model(x_bert, K1, K2)
@@ -391,17 +411,20 @@ for e in range(epoch_num):
     subject_model.eval()
     object_model.eval()
     A, B, C = 1e-10, 1e-10, 1e-10
-    for d in tqdm(iter(dev_data)):
-        R = set(extract_items(d['text'], d['text_words']))
-        T = set([tuple(i) for i in d['spo_list']])
-        A += len(R & T)
-        B += len(R)
-        C += len(T)
+    for dev_batch in dev_D:
+        _T, _TM, _TS, _TT, _SPO, _TEXT = dev_batch
+        Rs = extract_items(_T, _TM, _TS, _TT, _TEXT)
+        for idx, R in enumerate(Rs):
+            R = set(R)
+            T = set(_SPO[idx])
+            A += len(R & T)
+            B += len(R)
+            C += len(T)
 
-        if R != T:
-            err_dict['err'].append({'text': d['text'],
-                                    'spo_list': d['spo_list'],
-                                    'predict': list(R)})
+            if R != T:
+                err_dict['err'].append({'text': _TEXT[idx],
+                                        'spo_list': _SPO[idx],
+                                        'predict': list(R)})
 
     f1, precision, recall = 2 * A / (B + C), A / B, A / C
     if f1 > best_score:
