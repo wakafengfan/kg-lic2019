@@ -1,7 +1,6 @@
 import collections
 import json
 import logging
-import pickle
 import random
 from collections import defaultdict
 from pathlib import Path
@@ -9,7 +8,6 @@ from random import choice
 
 import gensim
 import numpy as np
-import pyhanlp
 import torch
 import torch.nn as nn
 from pytorch_pretrained_bert import BertAdam
@@ -72,7 +70,7 @@ bert_vocab = load_vocab(bert_vocab_path)
 wv_model = gensim.models.KeyedVectors.load(str(Path(data_dir)/'tencent_embed_for_el2019'))
 word2vec = wv_model.wv.syn0
 word_size = word2vec.shape[1]
-word2vec = np.concatenate([np.zeros((1,word_size)), np.zeros((1,word_size)),word2vec])
+word2vec = np.concatenate([np.zeros((1,word_size)), np.zeros((1,word_size)),word2vec])  # [word_size+2,200]
 id2word = {i+2:j for i,j in enumerate(wv_model.wv.index2word)}
 word2id = {j:i for i, j in id2word.items()}
 def seq2vec(token_ids):
@@ -81,7 +79,7 @@ def seq2vec(token_ids):
         V.append([])
         for w in s:
             for _ in w:
-                V[-1].append(word2id.get(w, 0))
+                V[-1].append(word2id.get(w, 1))
     V = seq_padding(V)
     V = word2vec[V]
     return V
@@ -89,7 +87,7 @@ def seq2vec(token_ids):
 
 def seq_padding(X):
     ML = max(map(len, X))
-    return [x + [0] * (ML - len(x)) for x in X]
+    return np.array([x + [0] * (ML - len(x)) for x in X])
 
 # def random_generate(d, spo_list_key):
 #     r = np.random.random()
@@ -237,6 +235,7 @@ class SubjectModel(BertPreTrainedModel):
         input_wv = self.wv_linear(input_wv)
         encoder_layers, _ = self.bert(input_id, token_type_id, input_mask, output_all_encoded_layers=False)
         x = input_wv + encoder_layers #[b,s,h]
+        x = torch.dropout(x,p=0.25,train=self.training)
 
         ps1 = torch.sigmoid(self.linear1(x).squeeze(-1))  # [b,s,h]->[b,s,1]->[b,s]
         ps2 = torch.sigmoid(self.linear2(x).squeeze(-1))
