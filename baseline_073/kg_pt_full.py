@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from pytorch_pretrained_bert import BertAdam
 from pytorch_pretrained_bert.modeling import BertPreTrainedModel, BertModel
+from tqdm import tqdm
 
 from configuration.config import data_dir, bert_vocab_path, bert_data_path, bert_model_path
 
@@ -33,7 +34,11 @@ torch.manual_seed(42)
 
 
 train_data = json.load(open(data_dir + '/train_data_me_3.json'))
-dev_data = json.load(open(data_dir + '/dev_data_me_3.json'))
+dev_data = [d for i, d in enumerate(train_data) if i%8 ==0]
+train_data = [d for i, d in enumerate(train_data) if i%8 !=0]
+
+# dev_data = json.load(open(data_dir + '/dev_data_me_3.json'))
+
 # info_ = pickle.load((Path(data_dir)/'info_.pkl').open('rb'))
 # predicates = info_['predicates']
 # sp2o = info_['sp2o']
@@ -203,7 +208,7 @@ class dev_data_generator:
             dev_T.append(text_ids)
             dev_TM.append(text_mask)
             dev_TT.append(text_words)
-            dev_SPO.append(set([tuple(i) for i in d['spo_list']]))
+            dev_SPO.append(list(set([tuple(i) for i in d['spo_list']])))
             dev_TEXT.append(text)
 
             dev_T = torch.tensor(dev_T, dtype=torch.long, device=device)
@@ -355,8 +360,6 @@ for e in range(epoch_num):
 
     for batch in train_D:
         batch_idx += 1
-        if batch_idx>1:
-            break
 
         batch = tuple(t.to(device) for t in batch)
         T, S1, S2, K1, K2, O1, O2, TM, TS,TT = batch
@@ -402,10 +405,9 @@ for e in range(epoch_num):
     subject_model.eval()
     object_model.eval()
     A, B, C = 1e-10, 1e-10, 1e-10
-    for dev_batch in dev_D:
+    for dev_batch in tqdm(dev_D):
         _T, _TM, _TS, _TT, _SPO, _TEXT = dev_batch
-        R = extract_items(_T, _TM, _TS, _TT, _TEXT)
-        R = set(R)
+        R = set(extract_items(_T, _TM, _TS, _TT, _TEXT))
         T = set(_SPO[0])
         A += len(R & T)
         B += len(R)
@@ -422,7 +424,6 @@ for e in range(epoch_num):
         best_epoch = e
 
         json.dump(err_dict, err_log, ensure_ascii=False)
-
 
     logger.info(
         f'Epoch:{e}-precision:{precision:.4f}-recall:{recall:.4f}-f1:{f1:.4f} - best f1: {best_score:.4f} - best epoch:{best_epoch}')

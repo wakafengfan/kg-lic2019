@@ -365,8 +365,6 @@ for e in range(epoch_num):
 
     for batch in train_D:
         batch_idx += 1
-        if batch_idx>1:
-            break
 
         batch = tuple(t.to(device) for t in batch)
         T, S1, S2, K1, K2, O1, O2, TM, TS,TT = batch
