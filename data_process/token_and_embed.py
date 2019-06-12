@@ -4,7 +4,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-import pyhanlp
+# import pyhanlp
 from tqdm import tqdm
 
 from configuration.config import data_dir, tencent_w2v_path
