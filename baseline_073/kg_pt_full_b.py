@@ -206,13 +206,14 @@ class dev_data_generator:
             dev_SPO.append(set([tuple(i) for i in d['spo_list']]))
             dev_TEXT.append(text)
 
-            dev_T = torch.tensor(dev_T, dtype=torch.long, device=device)
-            dev_TM = torch.tensor(dev_TM, dtype=torch.long, device=device)
-            dev_TS = torch.zeros(*dev_T.size(), dtype=torch.long, device=device)
-            dev_TT = torch.tensor(seq2vec(dev_TT), dtype=torch.float32, device=device)
+            if len(dev_T) == 1 or i == len(self.data)-1:
+                dev_T = torch.tensor(seq_padding(dev_T), dtype=torch.long, device=device)
+                dev_TM = torch.tensor(seq_padding(dev_TM), dtype=torch.long, device=device)
+                dev_TS = torch.zeros(*dev_T.size(), dtype=torch.long, device=device)
+                dev_TT = torch.tensor(seq2vec(dev_TT), dtype=torch.float32, device=device)
 
-            yield dev_T, dev_TM, dev_TS, dev_TT, dev_SPO, dev_TEXT
-            dev_T, dev_TM, dev_TT, dev_SPO, dev_TEXT = [], [], [], [], []
+                yield dev_T, dev_TM, dev_TS, dev_TT, dev_SPO, dev_TEXT
+                dev_T, dev_TM, dev_TT, dev_SPO, dev_TEXT = [], [], [], [], []
 
 
 train_D = data_generator(train_data)
@@ -310,35 +311,44 @@ optimizer = BertAdam(optimizer_grouped_parameters,
 
 
 def extract_items(_T, _TM,_TS,_TT,_TEXT):
-    R = []
+    Rs = []
 
     with torch.no_grad():
-        _K1, _K2, _t_b = subject_model(_T, _TS,_TM, _TT)  # _k1:[b,s] _t_b:[1,s,h]
+        _K1, _K2, _T_B = subject_model(_T, _TS,_TM, _TT)  # _k1:[b,s]
+        _M = 1-_TM.byte()
+        _K1.masked_fill_(_M,0)
+        _K2.masked_fill_(_M,0)
+        _T_B.masked_fill_(_M.unsqueeze(2),0)
 
-    _k1, _k2,text_in = _K1[0], _K2[0],_TEXT[0]
-    for i, _kk1 in enumerate(_k1):
-        if _kk1 > 0.5:
-            _subject = ''
-            for j, _kk2 in enumerate(_k2[i:]):
-                if _kk2 > 0.5:
-                    _subject = text_in[i: i + j + 1]
-                    break
-            if _subject:
-                _kk1, _kk2 = torch.tensor([i]), torch.tensor([i + j])
-                with torch.no_grad():
-                    _o1, _o2 = object_model(_t_b, _kk1, _kk2)  # [b,s,50]
-                _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
-                _o1 = _o1.detach().cpu().numpy()
-                _o2 = _o2.detach().cpu().numpy()
-                for m, _oo1 in enumerate(_o1):
-                    if _oo1 > 0:
-                        for n, _oo2 in enumerate(_o2[m:]):
-                            if _oo2 == _oo1:
-                                _object = text_in[m: m + n + 1]
-                                _predicate = id2predicate[_oo1]
-                                R.append((_subject, _predicate, _object))
-                                break
-    return R
+    for idx in range(_K1.size(0)):
+        R = []
+        text_in = _TEXT[idx]
+
+        _k1, _k2,_t_b = _K1[idx], _K2[idx],_T_B[idx]
+        for i, _kk1 in enumerate(_k1):
+            if _kk1 > 0.5:
+                _subject = ''
+                for j, _kk2 in enumerate(_k2[i:]):
+                    if _kk2 > 0.5:
+                        _subject = text_in[i: i + j + 1]
+                        break
+                if _subject:
+                    _kk1, _kk2 = torch.tensor([i]), torch.tensor([i + j])
+                    with torch.no_grad():
+                        _o1, _o2 = object_model(_t_b.unsqueeze(0), _kk1, _kk2)  # [b,s,50]
+                    _o1, _o2 = torch.argmax(_o1[0], 1), torch.argmax(_o2[0], 1)
+                    _o1 = _o1.detach().cpu().numpy()
+                    _o2 = _o2.detach().cpu().numpy()
+                    for m, _oo1 in enumerate(_o1):
+                        if _oo1 > 0:
+                            for n, _oo2 in enumerate(_o2[m:]):
+                                if _oo2 == _oo1:
+                                    _object = text_in[m: m + n + 1]
+                                    _predicate = id2predicate[_oo1]
+                                    R.append((_subject, _predicate, _object))
+                                    break
+        Rs.append(list(set(R)))
+    return Rs
 
 
 err_log = (Path(data_dir) / 'err_log.json').open('w')
@@ -404,17 +414,18 @@ for e in range(epoch_num):
     A, B, C = 1e-10, 1e-10, 1e-10
     for dev_batch in dev_D:
         _T, _TM, _TS, _TT, _SPO, _TEXT = dev_batch
-        R = extract_items(_T, _TM, _TS, _TT, _TEXT)
-        R = set(R)
-        T = set(_SPO[0])
-        A += len(R & T)
-        B += len(R)
-        C += len(T)
+        Rs = extract_items(_T, _TM, _TS, _TT, _TEXT)
+        for idx, R in enumerate(Rs):
+            R = set(R)
+            T = set(_SPO[idx])
+            A += len(R & T)
+            B += len(R)
+            C += len(T)
 
-        if R != T:
-            err_dict['err'].append({'text': _TEXT[0],
-                                    'spo_list': _SPO[0],
-                                    'predict': list(R)})
+            if R != T:
+                err_dict['err'].append({'text': _TEXT[idx],
+                                        'spo_list': _SPO[idx],
+                                        'predict': list(R)})
 
     f1, precision, recall = 2 * A / (B + C), A / B, A / C
     if f1 > best_score:
