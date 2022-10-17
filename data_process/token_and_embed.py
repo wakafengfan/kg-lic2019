@@ -52,7 +52,29 @@ print(f'total word: {len(word_set)}')  # 253590
 # get tencent embedding from .gz
 tmpdir = tempfile.mkdtemp()
 with tarfile.open(Path(tencent_w2v_path)/'Tencent_AILab_ChineseEmbedding.tar.gz', 'r:gz') as archive:
-    archive.extractall(tmpdir)
+    
+    import os
+    
+    def is_within_directory(directory, target):
+        
+        abs_directory = os.path.abspath(directory)
+        abs_target = os.path.abspath(target)
+    
+        prefix = os.path.commonprefix([abs_directory, abs_target])
+        
+        return prefix == abs_directory
+    
+    def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+    
+        for member in tar.getmembers():
+            member_path = os.path.join(path, member.name)
+            if not is_within_directory(path, member_path):
+                raise Exception("Attempted Path Traversal in Tar File")
+    
+        tar.extractall(path, members, numeric_owner=numeric_owner) 
+        
+    
+    safe_extract(archive, tmpdir)
 
 serialization_dir = tmpdir
 for fn in Path(serialization_dir).iterdir():
